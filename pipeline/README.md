@@ -16,8 +16,29 @@ One binary. No Python, no shell script, no intermediate files.
 
 ## Quick start
 
+Two commands. The first tells you what the second needs.
+
 ```sh
-rda-ensemble \
+rda-ensemble datasets NC.geojson
+```
+
+```
+Total population  (--census)
+  T_20_CENS     Total Population 2020
+  T_10_CENS     Total Population 2010
+  ...
+
+Elections  (--elections)
+  E_16-20_COMP  Composite 2016-2020
+                averages E_20_PRES, E_20_GOV, E_20_SEN, E_16_PRES, E_20_AG, E_16_SEN
+  E_20_PRES     President 2020
+  ...
+```
+
+Then pass the names you want:
+
+```sh
+rda-ensemble run \
   --geojson NC.geojson \
   --state NC --plan-type congress --districts 14 \
   --census T_20_CENS --vap V_20_VAP --cvap V_20_CVAP \
@@ -40,23 +61,31 @@ North Carolina, 2,666 precincts, 1,000 steps: about two seconds.
 ## Finding the dataset names
 
 The four dataset options are the ones people get stuck on, because the names
-live inside the GeoJSON and vary by state and vintage. You do not have to go
-looking. Guess, and the error tells you:
+live inside the GeoJSON and vary by state and vintage. You never have to go
+looking for them: DRA labels every dataset with a title, and composites say
+which elections they average, so `rda-ensemble datasets <file>` reads that
+back to you, grouped by the option each name belongs to.
 
-```
-$ rda-ensemble --census T_20 ...
-rda-ensemble: --census T_20 is not in the GeoJSON.
-Available: T_10_CENS, T_19_ACS, T_20_ACS, T_20_CENS, T_22_ACS
-```
-
-The same for `--vap`, `--cvap` and `--elections`. As a rule:
+As a rule:
 
 - `--census` is a `T_` name. `T_20_CENS` is the 2020 census.
 - `--vap` and `--cvap` are `V_` names, voting-age and citizen voting-age.
-- `--elections` are `E_` names. `--elections all` takes every one, which is
-  thorough and slow; a composite such as `E_16-20_COMP` is the usual choice.
+- `--elections` are `E_` names. A composite such as `E_16-20_COMP` averages
+  several statewide races and is the usual choice; `--elections all` takes
+  every one, which is thorough and slow.
+
+Get one wrong and the error lists what the file actually carries:
+
+```
+rda-ensemble: --census T_20 is not in the GeoJSON.
+Available: T_10_CENS, T_19_ACS, T_20_ACS, T_20_CENS, T_22_ACS
+`rda-ensemble datasets NC.geojson` describes each one.
+```
 
 ## Options
+
+Everything below belongs to `rda-ensemble run`. The other command is
+`rda-ensemble datasets <FILE>`, which takes nothing else.
 
 Almost nothing has a default. Dataset names, district counts, tolerances and
 chain parameters all change the answer, so the run has to say what it wants

@@ -24,14 +24,14 @@ use serde_json::Value;
 use crate::artifacts::{Artifact, Artifacts};
 use crate::manifest;
 use crate::scoring::{ScoringWriter, Summary};
-use crate::{Cli, Variant};
+use crate::{RunArgs, Variant};
 
 /// Node attribute names on the ReCom graph. Fixed, because nothing outside
 /// this binary reads them: the graph is built and consumed in one process.
 const POP_COL: &str = "TOTAL_POP";
 const ASSIGNMENT_COL: &str = "INITIAL";
 
-pub fn run(cli: &Cli, keep: &[Artifact]) -> Result<()> {
+pub fn run(cli: &RunArgs, keep: &[Artifact]) -> Result<()> {
     check(cli)?;
     let started = Instant::now();
     std::fs::create_dir_all(&cli.out)
@@ -46,7 +46,7 @@ pub fn run(cli: &Cli, keep: &[Artifact]) -> Result<()> {
 
 /// Parameter checks that would otherwise fail deep inside a library, or
 /// worse, not fail at all.
-fn check(cli: &Cli) -> Result<()> {
+fn check(cli: &RunArgs) -> Result<()> {
     if cli.districts < 2 {
         bail!("--districts must be at least 2; got {}", cli.districts);
     }
@@ -79,7 +79,7 @@ fn check(cli: &Cli) -> Result<()> {
 /// This is rdarust's `map-data`, `extract-graph` and `extract-data` in one
 /// pass, with the records handed straight to the context rather than written
 /// as JSONL and read back.
-fn read_state(cli: &Cli, artifacts: &Artifacts) -> Result<Context> {
+fn read_state(cli: &RunArgs, artifacts: &Artifacts) -> Result<Context> {
     let path = &cli.geojson;
     eprintln!("reading {}", path.display());
     let text = std::fs::read_to_string(path)
@@ -184,7 +184,7 @@ fn read_state(cli: &Cli, artifacts: &Artifacts) -> Result<Context> {
 }
 
 /// Fail on a dataset name the GeoJSON does not carry, and say what it does.
-fn check_datasets(doc: &Value, cli: &Cli, elections: &[String]) -> Result<()> {
+fn check_datasets(doc: &Value, cli: &RunArgs, elections: &[String]) -> Result<()> {
     let Some(available) = doc.get("datasets").and_then(|d| d.as_object()) else {
         bail!("the GeoJSON has no datasets object; is this a DRA export?");
     };
@@ -210,8 +210,10 @@ fn check_datasets(doc: &Value, cli: &Cli, elections: &[String]) -> Result<()> {
     ] {
         if !available.contains_key(name.as_str()) {
             bail!(
-                "{flag} {name} is not in the GeoJSON.\nAvailable: {}",
-                listing(prefix)
+                "{flag} {name} is not in the GeoJSON.\nAvailable: {}\n\
+                 `rda-ensemble datasets {}` describes each one.",
+                listing(prefix),
+                cli.geojson.display()
             );
         }
     }
@@ -225,9 +227,11 @@ fn check_datasets(doc: &Value, cli: &Cli, elections: &[String]) -> Result<()> {
         if !missing.is_empty() {
             bail!(
                 "--elections names {} that the GeoJSON does not carry.\nAvailable: {}\n\
-                 Or pass `--elections all` to score every one.",
+                 `rda-ensemble datasets {}` describes each one, and \
+                 `--elections all` takes them all.",
                 missing.join(", "),
-                listing("E_")
+                listing("E_"),
+                cli.geojson.display()
             );
         }
     }
@@ -239,7 +243,7 @@ fn check_datasets(doc: &Value, cli: &Cli, elections: &[String]) -> Result<()> {
 /// Returns the precinct index of each ReCom node, and the part each node
 /// landed in. partigraph numbers parts from 0.
 fn seed_plan(
-    cli: &Cli,
+    cli: &RunArgs,
     ctx: &Context,
     artifacts: &Artifacts,
 ) -> Result<(Vec<u32>, Vec<u32>)> {
@@ -312,7 +316,7 @@ fn seed_plan(
 
 /// Run the chain, scoring plans as they arrive.
 fn chain(
-    cli: &Cli,
+    cli: &RunArgs,
     artifacts: &Artifacts,
     ctx: Arc<Context>,
     order: Arc<Vec<u32>>,

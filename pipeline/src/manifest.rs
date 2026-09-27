@@ -14,7 +14,7 @@ use rdarust_core::context::Context;
 use serde_json::{json, Map, Value};
 
 use crate::scoring::Summary;
-use crate::Cli;
+use crate::RunArgs;
 
 /// A cheap, stable fingerprint of the input file.
 ///
@@ -31,7 +31,7 @@ fn fingerprint(path: &Path) -> Result<String> {
 }
 
 pub fn write(
-    cli: &Cli,
+    cli: &RunArgs,
     ctx: &Context,
     summary: &Summary,
     started: Instant,

@@ -9,6 +9,7 @@
 //! the run has to say what it wants.
 
 mod artifacts;
+mod datasets;
 mod manifest;
 mod run;
 mod scoring;
@@ -37,14 +38,36 @@ pub enum Variant {
     DistrictPairsRmst,
 }
 
-/// Generate a redistricting ensemble from a DRA GeoJSON and score every plan.
-///
-/// Reads one GeoJSON, builds the precinct graph, draws a population-balanced
-/// starting plan, runs a ReCom chain, and scores plans as the chain produces
-/// them. Nothing is written between stages unless `--keep` asks for it.
+/// Redistricting ensembles from a Dave's Redistricting GeoJSON.
 #[derive(Debug, Parser)]
 #[command(name = "rda-ensemble", version, max_term_width = 100)]
 pub struct Cli {
+    #[command(subcommand)]
+    pub command: Command,
+}
+
+#[derive(Debug, clap::Subcommand)]
+pub enum Command {
+    /// List the datasets a GeoJSON carries, with what each one is.
+    ///
+    /// Start here. The names this prints are what `run` wants for
+    /// --census, --vap, --cvap and --elections.
+    Datasets {
+        /// The DRA GeoJSON for one state.
+        #[arg(value_name = "FILE")]
+        geojson: PathBuf,
+    },
+    /// Generate an ensemble and score every plan.
+    ///
+    /// Reads one GeoJSON, builds the precinct graph, draws a
+    /// population-balanced starting plan, runs a ReCom chain, and scores
+    /// plans as the chain produces them. Nothing is written between stages
+    /// unless --keep asks for it.
+    Run(Box<RunArgs>),
+}
+
+#[derive(Debug, clap::Args)]
+pub struct RunArgs {
     // ---- what to read -----------------------------------------------------
     /// The DRA GeoJSON for one state.
     #[arg(long, value_name = "FILE", help_heading = "Input")]
@@ -215,6 +238,11 @@ fn main() {
 }
 
 fn real_main(cli: Cli) -> Result<()> {
-    let keep = KeepArg::expand(&cli.keep);
-    run::run(&cli, &keep)
+    match cli.command {
+        Command::Datasets { geojson } => datasets::list(&geojson),
+        Command::Run(args) => {
+            let keep = KeepArg::expand(&args.keep);
+            run::run(&args, &keep)
+        }
+    }
 }
