@@ -32,6 +32,7 @@ fn fingerprint(path: &Path) -> Result<String> {
 
 pub fn write(
     cli: &RunArgs,
+    districts: usize,
     ctx: &Context,
     summary: &Summary,
     started: Instant,
@@ -47,8 +48,14 @@ pub fn write(
         },
     );
     input.insert("state".into(), json!(cli.state));
-    input.insert("plan_type".into(), json!(cli.plan_type));
-    input.insert("districts".into(), json!(cli.districts));
+    input.insert("plan_type".into(), json!(cli.chamber.as_str()));
+    input.insert("districts".into(), json!(districts));
+    // Whether the count came from the statutory table or the command line,
+    // because a reader cannot tell them apart from the number alone.
+    input.insert(
+        "districts_from".into(),
+        json!(if cli.districts.is_some() { "--districts" } else { "statutory" }),
+    );
     input.insert("precincts".into(), json!(ctx.n_precincts()));
     input.insert("census".into(), json!(cli.census));
     input.insert("vap".into(), json!(cli.vap));

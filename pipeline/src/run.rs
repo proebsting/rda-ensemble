@@ -32,23 +32,55 @@ const POP_COL: &str = "TOTAL_POP";
 const ASSIGNMENT_COL: &str = "INITIAL";
 
 pub fn run(cli: &RunArgs, keep: &[Artifact]) -> Result<()> {
-    check(cli)?;
+    let districts = districts(cli)?;
+    check(cli, districts)?;
     let started = Instant::now();
     std::fs::create_dir_all(&cli.out)
         .with_context(|| format!("creating {}", cli.out.display()))?;
     let artifacts = Artifacts::new(&cli.out, keep);
 
-    let ctx = Arc::new(read_state(cli, &artifacts)?);
-    let (order, seed_assignments) = seed_plan(cli, &ctx, &artifacts)?;
+    let ctx = Arc::new(read_state(cli, districts, &artifacts)?);
+    let (order, seed_assignments) = seed_plan(cli, districts, &ctx, &artifacts)?;
     let order = Arc::new(order);
-    chain(cli, &artifacts, ctx.clone(), order, &seed_assignments, started)
+    chain(cli, districts, &artifacts, ctx.clone(), order, &seed_assignments, started)
+}
+
+/// How many districts to draw.
+///
+/// The statutory count for the state and chamber, unless --districts asks
+/// for something else. Most runs want the statutory one, which is why
+/// --districts is optional: a user who knows they want NC congressional
+/// districts should not also have to know there are 14.
+pub fn districts(cli: &RunArgs) -> Result<usize> {
+    let statutory =
+        rdarust_core::states::districts_for(&cli.state, cli.chamber.as_str());
+    match (cli.districts, statutory) {
+        (Some(asked), Some(known)) if asked as u32 != known => {
+            // Far more often a typo than a deliberate hypothetical, but the
+            // hypothetical is legitimate, so say so and carry on.
+            eprintln!(
+                "warning: {} {} has {known} districts, and --districts says {asked}. \
+                 Drawing {asked}.",
+                cli.state,
+                cli.chamber.as_str()
+            );
+            Ok(asked)
+        }
+        (Some(asked), _) => Ok(asked),
+        (None, Some(known)) => Ok(known as usize),
+        (None, None) => bail!(
+            "no statutory district count for {} {}; pass --districts to say how many",
+            cli.state,
+            cli.chamber.as_str()
+        ),
+    }
 }
 
 /// Parameter checks that would otherwise fail deep inside a library, or
 /// worse, not fail at all.
-fn check(cli: &RunArgs) -> Result<()> {
-    if cli.districts < 2 {
-        bail!("--districts must be at least 2; got {}", cli.districts);
+fn check(cli: &RunArgs, districts: usize) -> Result<()> {
+    if districts < 2 {
+        bail!("--districts must be at least 2; got {districts}");
     }
     if cli.steps == 0 {
         bail!("--steps must be at least 1");
@@ -79,7 +111,7 @@ fn check(cli: &RunArgs) -> Result<()> {
 /// This is rdarust's `map-data`, `extract-graph` and `extract-data` in one
 /// pass, with the records handed straight to the context rather than written
 /// as JSONL and read back.
-fn read_state(cli: &RunArgs, artifacts: &Artifacts) -> Result<Context> {
+fn read_state(cli: &RunArgs, districts: usize, artifacts: &Artifacts) -> Result<Context> {
     let path = &cli.geojson;
     eprintln!("reading {}", path.display());
     let text = std::fs::read_to_string(path)
@@ -178,7 +210,7 @@ fn read_state(cli: &RunArgs, artifacts: &Artifacts) -> Result<Context> {
     let ctx = rdarust_io::load_input_data_from_records(records)
         .map_err(|e| anyhow!("{e}"))?
         .with_graph(graph)
-        .into_context(&cli.state, &cli.plan_type, Some(cli.districts as u32))
+        .into_context(&cli.state, cli.chamber.as_str(), Some(districts as u32))
         .map_err(|e| anyhow!("{e}"))?;
     Ok(ctx)
 }
@@ -244,6 +276,7 @@ fn check_datasets(doc: &Value, cli: &RunArgs, elections: &[String]) -> Result<()
 /// landed in. partigraph numbers parts from 0.
 fn seed_plan(
     cli: &RunArgs,
+    districts: usize,
     ctx: &Context,
     artifacts: &Artifacts,
 ) -> Result<(Vec<u32>, Vec<u32>)> {
@@ -281,12 +314,12 @@ fn seed_plan(
         .map_err(|e| anyhow!("building the dual graph: {e}"))?;
     let weights: Vec<f64> = order.iter().map(|&i| ctx.pop[i as usize] as f64).collect();
 
-    eprintln!("drawing a starting plan with {} districts", cli.districts);
+    eprintln!("drawing a starting plan with {districts} districts");
     let balanced = partigraph::partition_balanced(
         &graph,
         &weights,
         &partigraph::BalanceParams {
-            parts: cli.districts,
+            parts: districts,
             epsilon: cli.seed_tolerance,
             seed: cli.rng_seed,
             ..Default::default()
@@ -317,6 +350,7 @@ fn seed_plan(
 /// Run the chain, scoring plans as they arrive.
 fn chain(
     cli: &RunArgs,
+    districts: usize,
     artifacts: &Artifacts,
     ctx: Arc<Context>,
     order: Arc<Vec<u32>>,
@@ -410,7 +444,7 @@ fn chain(
     if let Some(e) = &summary.error {
         bail!("scoring failed at {e}");
     }
-    manifest::write(cli, &ctx, &summary, started, &cli.out.join("manifest.json"))?;
+    manifest::write(cli, districts, &ctx, &summary, started, &cli.out.join("manifest.json"))?;
 
     eprintln!(
         "scored {} plans, from steps 0 to {}, in {:.1}s",

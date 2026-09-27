@@ -21,6 +21,28 @@ use clap::Parser;
 
 use artifacts::Artifact;
 
+/// Which chamber a plan is for. These are the three rdarust knows a
+/// statutory district count for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum Chamber {
+    /// The state's delegation to the US House.
+    Congress,
+    /// The upper house of the state legislature, usually the senate.
+    Upper,
+    /// The lower house, where the state has one.
+    Lower,
+}
+
+impl Chamber {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Chamber::Congress => "congress",
+            Chamber::Upper => "upper",
+            Chamber::Lower => "lower",
+        }
+    }
+}
+
 /// Which ReCom variant to run. The names match rustrecom's `--variant`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum Variant {
@@ -77,14 +99,15 @@ pub struct RunArgs {
     #[arg(long, value_name = "XX", help_heading = "Input")]
     pub state: String,
 
-    /// Which chamber the plan is for. Sets the statutory district count
-    /// rdarust scores against.
-    #[arg(long, value_name = "NAME", help_heading = "Input")]
-    pub plan_type: String,
+    /// Which chamber the plan is for. Fixes how many districts to draw,
+    /// unless --districts says otherwise.
+    #[arg(long = "plan-type", value_enum, value_name = "NAME", help_heading = "Input")]
+    pub chamber: Chamber,
 
-    /// How many districts to draw.
+    /// How many districts to draw. Defaults to the number this state's
+    /// chamber actually has, so most runs leave it out.
     #[arg(long, value_name = "N", help_heading = "Input")]
-    pub districts: usize,
+    pub districts: Option<usize>,
 
     // ---- which data to pull out of it -------------------------------------
     /// Census dataset name in the GeoJSON, e.g. T_20_CENS.

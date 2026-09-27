@@ -40,7 +40,7 @@ Then pass the names you want:
 ```sh
 rda-ensemble run \
   --geojson NC.geojson \
-  --state NC --plan-type congress --districts 14 \
+  --state NC --plan-type congress \
   --census T_20_CENS --vap V_20_VAP --cvap V_20_CVAP \
   --elections E_16-20_COMP \
   --seed-tolerance 0.01 \
@@ -56,7 +56,7 @@ That writes three files into `results/`:
 | `by_district.jsonl` | the same plans, broken out district by district |
 | `manifest.json` | what this run was, so somebody can repeat it |
 
-North Carolina, 2,666 precincts, 1,000 steps: about two seconds.
+North Carolina, 2,666 precincts, 10,000 steps: about two seconds.
 
 ## Finding the dataset names
 
@@ -97,8 +97,14 @@ rather than inherit a guess. `--help` prints all of this too.
 | --- | --- |
 | `--geojson <FILE>` | the DRA GeoJSON for one state |
 | `--state <XX>` | two-letter abbreviation, e.g. `NC` |
-| `--plan-type <NAME>` | `congress`, `upper`, `lower` — sets the statutory district count scoring compares against |
-| `--districts <N>` | how many districts to draw |
+| `--plan-type <NAME>` | `congress`, `upper` or `lower` |
+| `--districts <N>` | optional — how many districts to draw. Defaults to the number that chamber actually has |
+
+North Carolina's congressional delegation has 14 seats, so `--plan-type
+congress` is enough and `--districts` can be left out. Pass it to draw a
+different number — a hypothetical map, or a state and chamber the built-in
+table does not cover — and a disagreement with the statutory count is
+reported rather than silently accepted.
 
 ### Datasets
 
