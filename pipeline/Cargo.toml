@@ -1,0 +1,38 @@
+# Not a member of the rdarust workspace, deliberately.
+#
+# This crate depends on two projects that live outside this repository, so
+# it cannot build as part of `cargo build --workspace`. Keeping it separate
+# also means the directory lifts out into its own repository unchanged: only
+# the three path dependencies below would become git or version ones.
+# Its own workspace root: this crate is not part of rdarust's.
+[workspace]
+
+[package]
+name = "rda-ensemble"
+description = "Generate and score a redistricting ensemble from a DRA GeoJSON"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77"
+license = "MIT"
+
+[[bin]]
+name = "rda-ensemble"
+path = "src/main.rs"
+
+[dependencies]
+rdarust-core = { path = "../crates/rdarust-core" }
+rdarust-geo = { path = "../crates/rdarust-geo" }
+rdarust-io = { path = "../crates/rdarust-io" }
+
+# External. Override with a [patch] section or by editing these paths.
+partigraph = { path = "../../partigraph-rust/crates/partigraph" }
+rustrecom = { path = "../../../ext/rustrecom" }
+
+anyhow = "1"
+clap = { version = "4", features = ["derive", "wrap_help"] }
+serde = "1"
+serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
