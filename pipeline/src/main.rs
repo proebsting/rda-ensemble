@@ -110,17 +110,28 @@ pub struct RunArgs {
     pub districts: Option<usize>,
 
     // ---- which data to pull out of it -------------------------------------
-    /// Census dataset name in the GeoJSON, e.g. T_20_CENS.
-    #[arg(long, value_name = "NAME", help_heading = "Datasets")]
-    pub census: String,
+    /// Census cycle, e.g. 2020. Picks the population, voting-age and
+    /// citizen voting-age datasets for that year out of the GeoJSON, so
+    /// most runs need nothing else here.
+    #[arg(
+        long,
+        value_name = "YEAR",
+        required_unless_present_all = ["census", "vap", "cvap"],
+        help_heading = "Datasets"
+    )]
+    pub cycle: Option<i64>,
 
-    /// Voting-age population dataset, e.g. V_20_VAP.
+    /// Census dataset name, overriding --cycle's choice. e.g. T_20_CENS.
     #[arg(long, value_name = "NAME", help_heading = "Datasets")]
-    pub vap: String,
+    pub census: Option<String>,
 
-    /// Citizen voting-age population dataset, e.g. V_20_CVAP.
+    /// Voting-age population dataset, overriding --cycle's choice.
     #[arg(long, value_name = "NAME", help_heading = "Datasets")]
-    pub cvap: String,
+    pub vap: Option<String>,
+
+    /// Citizen voting-age population dataset, overriding --cycle's choice.
+    #[arg(long, value_name = "NAME", help_heading = "Datasets")]
+    pub cvap: Option<String>,
 
     /// Election datasets to score, comma separated. Use `all` for every
     /// election the GeoJSON carries.

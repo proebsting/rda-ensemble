@@ -40,8 +40,7 @@ Then pass the names you want:
 ```sh
 rda-ensemble run \
   --geojson NC.geojson \
-  --state NC --plan-type congress \
-  --census T_20_CENS --vap V_20_VAP --cvap V_20_CVAP \
+  --state NC --plan-type congress --cycle 2020 \
   --elections E_16-20_COMP \
   --seed-tolerance 0.01 \
   --steps 10000 --variant cut-edges-ust --tolerance 0.05 --rng-seed 1 \
@@ -110,11 +109,23 @@ reported rather than silently accepted.
 
 | option | |
 | --- | --- |
-| `--census <NAME>` | population dataset |
-| `--vap <NAME>` | voting-age population |
-| `--cvap <NAME>` | citizen voting-age population |
+| `--cycle <YEAR>` | picks the population, voting-age and citizen voting-age datasets for that year |
+| `--census <NAME>` | optional — overrides what `--cycle` picked |
+| `--vap <NAME>` | optional — likewise |
+| `--cvap <NAME>` | optional — likewise |
 | `--elections <LIST>` | comma-separated, or `all` |
 | `--expand-composites` | also score each election a composite averages, separately |
+
+`--cycle 2020` reads the year off each dataset in the GeoJSON rather than
+guessing from its name, so it does not care what a future export calls
+things. Where a year has more than one candidate it takes the unqualified
+one — the decennial count rather than the ACS estimate, the plain
+voting-age population rather than the non-Hispanic-alone breakdown — and
+where that is still ambiguous it lists the candidates and stops rather than
+choosing for you.
+
+`--elections` is deliberately not part of this. Which races to analyse is a
+judgement, not a consequence of the decade.
 
 ### Starting plan
 

@@ -12,7 +12,7 @@ use serde_json::Value;
 
 /// Which option a dataset belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum Kind {
+pub enum Kind {
     Census,
     Vap,
     Cvap,
@@ -35,7 +35,7 @@ impl Kind {
 /// `votingAge` separates census from VAP. DRA carries no flag for citizenship,
 /// so the name is the signal -- `V_20_CVAP` against `V_20_VAP` -- which is
 /// also how the titles read ("Citizen VAP 2020").
-fn classify(name: &str, entry: &Value) -> Option<Kind> {
+pub fn classify(name: &str, entry: &Value) -> Option<Kind> {
     match entry.get("type").and_then(|t| t.as_str())? {
         "election" => Some(Kind::Election),
         "demographic" => {
@@ -111,4 +111,99 @@ pub fn list(path: &Path) -> Result<()> {
 
 fn year(entry: &Value) -> i64 {
     entry.get("year").and_then(|y| y.as_i64()).unwrap_or(0)
+}
+
+/// The three demographic datasets for a census cycle.
+pub struct Cycle {
+    pub census: String,
+    pub vap: String,
+    pub cvap: String,
+}
+
+/// Pick the demographic datasets a cycle wants, from the file's own labels.
+///
+/// DRA tags every dataset with the year it describes, so nothing here has to
+/// know that the 2020 census is called `T_20_CENS`: it is the demographic
+/// dataset for 2020 that is not voting-age. That keeps the choice driven by
+/// the data rather than by a naming convention which a future export could
+/// perfectly well change.
+pub fn for_cycle(doc: &Value, year: i64) -> Result<Cycle> {
+    let Some(datasets) = doc.get("datasets").and_then(|d| d.as_object()) else {
+        bail!("the GeoJSON has no datasets object; is this a DRA export?");
+    };
+
+    // Several datasets can describe the same year: 2020 has both the
+    // decennial count and an ACS estimate of total population, and both a
+    // plain VAP and a non-Hispanic-alone breakdown. DRA marks the variants
+    // -- `nhAlone` on one, an ACS `description` on the other -- and leaves
+    // the headline dataset unqualified, so prefer the unqualified one.
+    let plain = |entry: &Value| {
+        entry.get("nhAlone").is_none() && entry.get("description").is_none()
+    };
+
+    let candidates = |want: Kind| -> Vec<String> {
+        let all: Vec<(&String, &Value)> = datasets
+            .iter()
+            .filter(|(name, entry)| {
+                classify(name, entry) == Some(want) && self::year(entry) == year
+            })
+            .collect();
+        // CVAP only ever comes from the ACS, so narrowing would empty the
+        // set; keep everything when that happens.
+        let narrowed: Vec<_> = all.iter().filter(|(_, e)| plain(e)).collect();
+        if narrowed.is_empty() {
+            all.iter().map(|(n, _)| (*n).clone()).collect()
+        } else {
+            narrowed.iter().map(|(n, _)| (*n).clone()).collect()
+        }
+    };
+
+    let pick = |want: Kind, flag: &str| -> Result<String> {
+        let mut found = candidates(want);
+        match found.len() {
+            1 => Ok(found.remove(0)),
+            // Never guess between equals: the choice changes every score.
+            _ => {
+                found.sort();
+                bail!(
+                    "{} dataset for {year} in this GeoJSON: {}.\n\
+                     Name the one you want with {flag}.",
+                    if found.is_empty() { "no".to_string() } else { format!("{} candidates for the", found.len()) },
+                    if found.is_empty() { "none".to_string() } else { found.join(", ") }
+                )
+            }
+        }
+    };
+
+    let mut missing = Vec::new();
+    for (kind, flag) in
+        [(Kind::Census, "--census"), (Kind::Vap, "--vap"), (Kind::Cvap, "--cvap")]
+    {
+        if candidates(kind).is_empty() {
+            missing.push(flag);
+        }
+    }
+    if !missing.is_empty() {
+        let mut years: Vec<i64> = datasets
+            .iter()
+            .filter(|(n, e)| classify(n, e).is_some_and(|k| k != Kind::Election))
+            .map(|(_, e)| self::year(e))
+            .collect();
+        years.sort_unstable();
+        years.dedup();
+        bail!(
+            "no {} dataset for {year} in this GeoJSON.\n\
+             Demographic years it carries: {}\n\
+             Pick a different --cycle, or name the datasets with {} directly.",
+            missing.join(" or "),
+            years.iter().map(|y| y.to_string()).collect::<Vec<_>>().join(", "),
+            missing.join(", ")
+        );
+    }
+
+    Ok(Cycle {
+        census: pick(Kind::Census, "--census")?,
+        vap: pick(Kind::Vap, "--vap")?,
+        cvap: pick(Kind::Cvap, "--cvap")?,
+    })
 }

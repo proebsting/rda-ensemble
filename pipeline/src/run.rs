@@ -124,18 +124,31 @@ fn read_state(cli: &RunArgs, districts: usize, artifacts: &Artifacts) -> Result<
     } else {
         cli.elections.clone()
     };
+    // --cycle picks the three demographic datasets out of the file; naming
+    // one explicitly overrides that choice.
+    let picked = match cli.cycle {
+        Some(year) => Some(crate::datasets::for_cycle(&doc, year)?),
+        None => None,
+    };
+    let census = resolve("--census", cli.census.as_deref(), picked.as_ref().map(|c| &c.census))?;
+    let vap = resolve("--vap", cli.vap.as_deref(), picked.as_ref().map(|c| &c.vap))?;
+    let cvap = resolve("--cvap", cli.cvap.as_deref(), picked.as_ref().map(|c| &c.cvap))?;
+    if let Some(year) = cli.cycle {
+        eprintln!("  {year} cycle: census {census}, vap {vap}, cvap {cvap}");
+    }
+
     // Check the dataset names before anything else reads them. A name that
     // is not in the file would otherwise sail through extraction and fail
     // much later, inside a scoring formula, where the message means nothing.
-    check_datasets(&doc, cli, &elections)?;
+    check_datasets(&doc, cli, &census, &vap, &cvap, &elections)?;
 
     let mut warnings = Vec::new();
     let data_map = rdarust_io::map_data(
         &doc,
         &DataMapSpec {
-            census: &cli.census,
-            vap: &cli.vap,
-            cvap: &cli.cvap,
+            census: &census,
+            vap: &vap,
+            cvap: &cvap,
             elections: &elections,
             expand_composites: cli.expand_composites,
             version: None,
@@ -219,7 +232,23 @@ fn read_state(cli: &RunArgs, districts: usize, artifacts: &Artifacts) -> Result<
 }
 
 /// Fail on a dataset name the GeoJSON does not carry, and say what it does.
-fn check_datasets(doc: &Value, cli: &RunArgs, elections: &[String]) -> Result<()> {
+/// A dataset name: the one given, else the one --cycle picked.
+fn resolve(flag: &str, given: Option<&str>, picked: Option<&String>) -> Result<String> {
+    match (given, picked) {
+        (Some(name), _) => Ok(name.to_string()),
+        (None, Some(name)) => Ok(name.clone()),
+        (None, None) => bail!("give {flag}, or --cycle to pick it from the GeoJSON"),
+    }
+}
+
+fn check_datasets(
+    doc: &Value,
+    cli: &RunArgs,
+    census: &str,
+    vap: &str,
+    cvap: &str,
+    elections: &[String],
+) -> Result<()> {
     let Some(available) = doc.get("datasets").and_then(|d| d.as_object()) else {
         bail!("the GeoJSON has no datasets object; is this a DRA export?");
     };
@@ -238,12 +267,10 @@ fn check_datasets(doc: &Value, cli: &RunArgs, elections: &[String]) -> Result<()
         }
     };
 
-    for (flag, name, prefix) in [
-        ("--census", &cli.census, "T_"),
-        ("--vap", &cli.vap, "V_"),
-        ("--cvap", &cli.cvap, "V_"),
-    ] {
-        if !available.contains_key(name.as_str()) {
+    for (flag, name, prefix) in
+        [("--census", census, "T_"), ("--vap", vap, "V_"), ("--cvap", cvap, "V_")]
+    {
+        if !available.contains_key(name) {
             bail!(
                 "{flag} {name} is not in the GeoJSON.\nAvailable: {}\n\
                  `rda-ensemble datasets {}` describes each one.",
