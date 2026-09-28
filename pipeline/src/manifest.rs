@@ -68,6 +68,9 @@ pub fn write(
     input.insert("vap".into(), json!(ctx.keys.vap));
     input.insert("cvap".into(), json!(ctx.keys.cvap));
     input.insert("elections".into(), json!(ctx.keys.elections));
+    // rdapy labels the shape section of a data map this way; the geometry
+    // itself comes from the GeoJSON, not from a dataset of that name.
+    input.insert("shapes_label".into(), json!(ctx.keys.shapes));
     input.insert("expand_composites".into(), json!(cli.expand_composites));
 
     let mut chain = Map::new();
@@ -88,6 +91,14 @@ pub fn write(
     output.insert("sample_every".into(), json!(cli.sample_every));
     output.insert("plans_scored".into(), json!(summary.scored));
     output.insert("prefixed_columns".into(), json!(cli.prefixes));
+    // Scoring choices the command line does not have to mention. Without
+    // them the manifest cannot say which columns an ensemble has.
+    output.insert("majority_minority".into(), json!(true));
+    output.insert(
+        "reverse_weight_splitting".into(),
+        json!(cli.reverse_weight_splitting),
+    );
+    output.insert("score_mode".into(), json!("all"));
     output.insert("seconds".into(), json!(started.elapsed().as_secs_f64()));
 
     let mut versions = Map::new();

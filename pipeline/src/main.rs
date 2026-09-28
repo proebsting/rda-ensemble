@@ -13,6 +13,7 @@ mod datasets;
 mod manifest;
 mod run;
 mod scoring;
+mod settings;
 
 use std::path::PathBuf;
 
@@ -222,6 +223,11 @@ pub struct RunArgs {
     /// Report chain progress to stderr.
     #[arg(long, help_heading = "Output")]
     pub progress: bool,
+
+    /// Work out every setting, print them, and stop without running the
+    /// chain. Reads the GeoJSON, so it also catches a bad dataset name.
+    #[arg(long, help_heading = "Output")]
+    pub dry_run: bool,
 }
 
 impl Variant {

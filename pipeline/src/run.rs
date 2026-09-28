@@ -24,6 +24,7 @@ use serde_json::Value;
 use crate::artifacts::{Artifact, Artifacts};
 use crate::manifest;
 use crate::scoring::{ScoringWriter, Summary};
+use crate::settings::Settings;
 use crate::{RunArgs, Variant};
 
 /// Node attribute names on the ReCom graph. Fixed, because nothing outside
@@ -39,7 +40,10 @@ pub fn run(cli: &RunArgs, keep: &[Artifact]) -> Result<()> {
         .with_context(|| format!("creating {}", cli.out.display()))?;
     let artifacts = Artifacts::new(&cli.out, keep);
 
-    let ctx = Arc::new(read_state(cli, districts, &artifacts)?);
+    let Some(ctx) = read_state(cli, districts, &artifacts)? else {
+        return Ok(());
+    };
+    let ctx = Arc::new(ctx);
     let (order, seed_assignments) = seed_plan(cli, districts, &ctx, &artifacts)?;
     let order = Arc::new(order);
     chain(cli, districts, &artifacts, ctx.clone(), order, &seed_assignments, started)
@@ -108,7 +112,11 @@ fn check(cli: &RunArgs, districts: usize) -> Result<()> {
 /// This is rdarust's `map-data`, `extract-graph` and `extract-data` in one
 /// pass, with the records handed straight to the context rather than written
 /// as JSONL and read back.
-fn read_state(cli: &RunArgs, districts: usize, artifacts: &Artifacts) -> Result<Context> {
+fn read_state(
+    cli: &RunArgs,
+    districts: usize,
+    artifacts: &Artifacts,
+) -> Result<Option<Context>> {
     let path = &cli.geojson;
     eprintln!("reading {}", path.display());
     let text = std::fs::read_to_string(path)
@@ -130,10 +138,6 @@ fn read_state(cli: &RunArgs, districts: usize, artifacts: &Artifacts) -> Result<
     let census = resolve("--census", cli.census.as_deref(), picked.as_ref().map(|c| &c.census))?;
     let vap = resolve("--vap", cli.vap.as_deref(), picked.as_ref().map(|c| &c.vap))?;
     let cvap = resolve("--cvap", cli.cvap.as_deref(), picked.as_ref().map(|c| &c.cvap))?;
-    if let Some(year) = cli.cycle {
-        eprintln!("  {year} cycle: census {census}, vap {vap}, cvap {cvap}");
-    }
-
     // Check the dataset names before anything else reads them. A name that
     // is not in the file would otherwise sail through extraction and fail
     // much later, inside a scoring formula, where the message means nothing.
@@ -177,6 +181,13 @@ fn read_state(cli: &RunArgs, districts: usize, artifacts: &Artifacts) -> Result<
         );
     }
     artifacts.write_json_pretty(Artifact::DataMap, &data_map)?;
+
+    report(cli, districts, &census, &vap, &cvap, &data_map_elections(&data_map));
+    if cli.dry_run {
+        eprintln!("\n--dry-run: nothing was written");
+        return Ok(None);
+    }
+    eprintln!();
 
     let features = rdarust_io::geojson::features_of(&doc).map_err(|e| anyhow!("{e}"))?;
     drop(text);
@@ -225,10 +236,117 @@ fn read_state(cli: &RunArgs, districts: usize, artifacts: &Artifacts) -> Result<
     for w in &ctx.warnings {
         eprintln!("warning: {w}");
     }
-    Ok(ctx)
+    Ok(Some(ctx))
 }
 
 /// Fail on a dataset name the GeoJSON does not carry, and say what it does.
+/// The elections the data map ended up naming, which `all` and
+/// `--expand-composites` both change.
+fn data_map_elections(data_map: &Value) -> Vec<String> {
+    data_map
+        .get("election")
+        .and_then(|e| e.get("datasets"))
+        .and_then(|d| d.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .unwrap_or_default()
+}
+
+/// Print every resolved setting, marking anything the command line did not
+/// say outright.
+fn report(
+    cli: &RunArgs,
+    districts: usize,
+    census: &str,
+    vap: &str,
+    cvap: &str,
+    elections: &[String],
+) {
+    let mut s = Settings::default();
+    let from_cycle = |given: &Option<String>| match (given, cli.cycle) {
+        (Some(_), _) => None,
+        (None, Some(year)) => Some(format!("--cycle {year}")),
+        (None, None) => None,
+    };
+
+    s.section("Input").given("state", &cli.state).given("chamber", cli.chamber.as_str());
+    match cli.districts {
+        Some(_) => s.given("districts", districts),
+        None => s.derived(
+            "districts",
+            districts,
+            format!("statutory, {} {}", cli.state, cli.chamber.as_str()),
+        ),
+    };
+
+    s.section("Data");
+    for (name, value, given) in [
+        ("census", census, &cli.census),
+        ("voting-age pop", vap, &cli.vap),
+        ("citizen VAP", cvap, &cli.cvap),
+    ] {
+        match from_cycle(given) {
+            Some(from) => s.derived(name, value, from),
+            None => s.given(name, value),
+        };
+    }
+    // Name them rather than counting them: `all` and `--expand-composites`
+    // can turn one argument into twenty, and "22 of them" does not tell
+    // anybody what they scored.
+    let asked_for_all = cli.elections.iter().any(|e| e == "all");
+    let source = match (asked_for_all, cli.expand_composites) {
+        (true, _) => Some("--elections all"),
+        (false, true) => Some("--expand-composites"),
+        (false, false) => None,
+    };
+    let mut lines = wrap(elections, 56);
+    let first = if lines.is_empty() { String::new() } else { lines.remove(0) };
+    match source {
+        Some(from) => s.derived("elections", first, format!("{from}, {} in all", elections.len())),
+        None => s.given("elections", first),
+    };
+    for line in lines {
+        s.note(line);
+    }
+
+    s.section("Starting plan").given("population tolerance", cli.seed_tolerance);
+
+    s.section("Chain")
+        .given("variant", cli.variant.as_str())
+        .given("steps", cli.steps)
+        .given("population tolerance", cli.tolerance)
+        .given("rng seed", cli.rng_seed);
+    if cli.variant == crate::Variant::Reversible {
+        s.given("balance upper bound", cli.balance_ub.unwrap_or(0));
+    }
+    s.given("threads", cli.threads).given("batch size", cli.batch_size);
+
+    s.section("Scoring")
+        .given("sample every", format!("{} step(s)", cli.sample_every))
+        .derived("majority-minority", "counted", "always on")
+        .given(
+            "reverse-weight splitting",
+            if cli.reverse_weight_splitting { "reported" } else { "not reported" },
+        )
+        .given("column names", if cli.prefixes { "dataset-prefixed" } else { "plain" });
+
+    eprint!("{}", s.render());
+}
+
+/// Comma-separated names, broken into lines of at most `width` characters.
+fn wrap(names: &[String], width: usize) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for name in names {
+        match lines.last_mut() {
+            Some(line) if line.len() + 2 + name.len() <= width => {
+                line.push_str(", ");
+                line.push_str(name);
+            }
+            _ => lines.push(name.clone()),
+        }
+    }
+    lines
+}
+
 /// A dataset name: the one given, else the one --cycle picked.
 fn resolve(flag: &str, given: Option<&str>, picked: Option<&String>) -> Result<String> {
     match (given, picked) {

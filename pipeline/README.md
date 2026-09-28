@@ -172,6 +172,36 @@ produces. Leave it at 1 for a run anybody needs to reproduce.
 | `--reverse-weight-splitting` | two extra county-splitting columns |
 | `--progress` | chain progress on stderr |
 
+## Knowing what you got
+
+Several options are shorthand. `--cycle` stands for three dataset names,
+`--plan-type` stands for a district count, `--elections all` stands for
+however many elections the file holds. So every run opens by printing what
+it resolved, annotating anything the command line did not say outright:
+
+```
+Input
+  state                     NC
+  chamber                   congress
+  districts                 14          statutory, NC congress
+
+Data
+  census                    T_20_CENS   --cycle 2020
+  voting-age pop            V_20_VAP    --cycle 2020
+  citizen VAP               V_20_CVAP   --cycle 2020
+  elections                 E_16-20_COMP
+...
+```
+
+`--dry-run` prints that and stops, without running the chain or writing
+anything. It still reads the GeoJSON, so it catches a bad dataset name too.
+Under a second on North Carolina.
+
+`manifest.json` carries the same resolved values in machine-readable form,
+including the ones with no flag at all — majority-minority districts are
+always counted, and the score mode is always `all`, so both are recorded
+rather than left to be inferred from the columns.
+
 ## Sampling
 
 `--sample-every 10` scores steps 0, 10, 20 and so on, and the rows are named
