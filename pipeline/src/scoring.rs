@@ -15,6 +15,7 @@
 //! `--sample-every N` here and `--sample-interval N` there select the same
 //! steps.
 
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::sync::{Arc, Mutex};
@@ -23,7 +24,8 @@ use rdarust_core::aggregate::{Aggregates, Mode};
 use rdarust_core::context::{Context, UNASSIGNED};
 use rdarust_core::score::ScoreOptions;
 use rdarust_io::{
-    records::write_record_sorted, scorecard_to_value, scored_aggregates_to_value, ScoresCsv,
+    flatten_scores, records::write_record_sorted, scorecard_to_value,
+    scored_aggregates_to_value, ScoresCsv,
 };
 use rustrecom::graph::Graph;
 use rustrecom::partition::Partition;
@@ -42,6 +44,10 @@ pub struct Summary {
     /// The first error scoring hit, if any. The chain cannot be stopped from
     /// inside a writer, so the rest of the run is skipped rather than scored.
     pub error: Option<String>,
+    /// Every numeric score, in sampling order, for the convergence
+    /// diagnostics. Ten thousand plans of forty-odd columns is a few
+    /// megabytes, so this is kept rather than re-read from the CSV.
+    pub series: BTreeMap<String, Vec<f64>>,
 }
 
 /// The steps at or after `start`, up to `end`, that are multiples of
@@ -142,6 +148,7 @@ impl ScoringWriter {
         let by_district = scored_aggregates_to_value(&self.aggs, &self.ctx, self.mode);
 
         self.csv.write(&name, &scores, self.prefixes)?;
+        self.record(&scores);
 
         let mut rec = Map::new();
         rec.insert("_tag_".into(), json!("by-district"));
@@ -166,6 +173,17 @@ impl ScoringWriter {
         summary.scored += 1;
         summary.steps = summary.steps.max(step);
         Ok(())
+    }
+
+    /// Keep each numeric score for the diagnostics.
+    fn record(&mut self, scores: &Value) {
+        let flat = flatten_scores(scores, self.prefixes);
+        let mut summary = self.summary.lock().expect("summary");
+        for (name, value) in flat {
+            if let Some(v) = value.as_f64() {
+                summary.series.entry(name).or_default().push(v);
+            }
+        }
     }
 
     /// Emit the plan that was already in place for every sampled step in

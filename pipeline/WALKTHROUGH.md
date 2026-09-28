@@ -606,13 +606,27 @@ nothing was printed. The progress bar is now on by default at a terminal, and
 `--no-progress` turns it off, but the underlying point stands: nothing warns
 you before you start that the run you have asked for is a long one.
 
-### Nothing says how many steps is enough
+### ~~Nothing says how many steps is enough~~ — fixed
 
-This is the real scientific gap. `--steps 10000` was picked because it is a
-round number, and the tool offers no opinion and no diagnostic. Whether a chain
-has mixed is the central question in ensemble work, and right now a user has no
-way to tell from anything the tool produces. Not a documentation problem — it
-needs a convergence statistic in the output.
+This was the real scientific gap. `--steps 10000` was picked because it is a
+round number, and nothing in the output said whether it was enough. Whether a
+chain has mixed is the central question in ensemble work.
+
+Every run now reports it:
+
+```
+convergence
+  R-hat        1.004 at worst, on average_margin   (4 chains of 500)
+  effective N  142 at worst, on opportunity_districts   (of 500 sampled)
+```
+
+Effective N says how many independent draws the sample is worth. R-hat says
+whether the chain saw the whole distribution, and needs `--chains 4`, because
+one chain cannot answer it: a chain stuck in one corner has perfectly
+uncorrelated samples *from that corner*.
+
+On Michigan, four chains of 2,000 steps give R-hat 1.061 and four of 25,000
+give 1.004. Nothing else in the output distinguishes them.
 
 ### Smaller things
 

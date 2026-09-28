@@ -10,6 +10,7 @@
 
 mod artifacts;
 mod datasets;
+mod diagnostics;
 mod dra;
 mod manifest;
 mod run;
@@ -251,6 +252,13 @@ pub struct RunArgs {
     /// as a fraction. Usually looser than --seed-tolerance.
     #[arg(long, value_name = "FRACTION", help_heading = "Chain")]
     pub tolerance: f64,
+
+    /// How many independent chains to run, each from its own starting plan
+    /// and its own derived seed. More than one lets R-hat say whether they
+    /// agree about the distribution, which one chain cannot. Four is the
+    /// usual choice. They run in parallel.
+    #[arg(long, value_name = "N", default_value_t = 1, help_heading = "Chain")]
+    pub chains: usize,
 
     /// Seed for the random number generator. The same seed, GeoJSON and
     /// parameters reproduce the same ensemble.

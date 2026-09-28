@@ -47,9 +47,68 @@ pub fn run(cli: &RunArgs, keep: &[Artifact]) -> Result<()> {
         return Ok(());
     };
     let ctx = Arc::new(ctx);
-    let (order, seed_assignments) = seed_plan(cli, districts, &ctx, &artifacts)?;
-    let order = Arc::new(order);
-    chain(cli, districts, steps, &package, &artifacts, ctx.clone(), order, &seed_assignments, started)
+
+    // Each chain gets its own seed, so its own starting plan as well as its
+    // own path. R-hat asks whether chains that began somewhere different
+    // ended up agreeing, which needs them to have begun somewhere different.
+    let summaries: Vec<Summary> = std::thread::scope(|scope| -> Result<Vec<Summary>> {
+        let mut handles = Vec::new();
+        for i in 0..cli.chains {
+            let ctx = ctx.clone();
+            let artifacts = &artifacts;
+            handles.push(scope.spawn(move || {
+                one_chain(cli, districts, steps, artifacts, ctx, i)
+            }));
+        }
+        handles.into_iter().map(|h| h.join().expect("a chain panicked")).collect()
+    })?;
+
+    report_convergence(cli, districts, steps, &package, &ctx, &artifacts, &summaries, started)
+}
+
+/// Where a chain's own output goes: straight into --out for a single chain,
+/// and a numbered directory each when there are several.
+fn chain_dir(cli: &RunArgs, index: usize) -> std::path::PathBuf {
+    if cli.chains <= 1 {
+        cli.out.clone()
+    } else {
+        cli.out.join(format!("chain_{}", index + 1))
+    }
+}
+
+/// Seeds are derived rather than asked for, so `--rng-seed 1 --chains 4`
+/// still names the whole run with one number.
+fn chain_seed(cli: &RunArgs, index: usize) -> u64 {
+    cli.rng_seed.wrapping_add(index as u64)
+}
+
+/// One chain: draw a starting plan, run it, score as it goes.
+fn one_chain(
+    cli: &RunArgs,
+    districts: usize,
+    steps: u64,
+    artifacts: &Artifacts,
+    ctx: Arc<Context>,
+    index: usize,
+) -> Result<Summary> {
+    let dir = chain_dir(cli, index);
+    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    // The state-level artifacts -- data map, graph, precinct data -- are the
+    // same for every chain and were written once. These are not.
+    let mine = artifacts.relocated(&dir);
+
+    let (order, seed_assignments) =
+        seed_plan(cli, districts, &ctx, &mine, chain_seed(cli, index), index)?;
+    chain(
+        cli,
+        steps,
+        &mine,
+        ctx,
+        Arc::new(order),
+        &seed_assignments,
+        index,
+        &dir,
+    )
 }
 
 /// How many districts to draw.
@@ -605,6 +664,8 @@ fn seed_plan(
     districts: usize,
     ctx: &Context,
     artifacts: &Artifacts,
+    seed: u64,
+    index: usize,
 ) -> Result<(Vec<u32>, Vec<u32>)> {
     let order = ctx.sorted_precinct_order();
     let mut position = vec![u32::MAX; ctx.n_precincts()];
@@ -640,14 +701,18 @@ fn seed_plan(
         .map_err(|e| anyhow!("building the dual graph: {e}"))?;
     let weights: Vec<f64> = order.iter().map(|&i| ctx.pop[i as usize] as f64).collect();
 
-    eprintln!("drawing a starting plan with {districts} districts");
+    if cli.chains <= 1 {
+        eprintln!("drawing a starting plan with {districts} districts");
+    } else {
+        eprintln!("chain {}: drawing a starting plan with {districts} districts", index + 1);
+    }
     let balanced = partigraph::partition_balanced(
         &graph,
         &weights,
         &partigraph::BalanceParams {
             parts: districts,
             epsilon: cli.seed_tolerance,
-            seed: cli.rng_seed,
+            seed,
             ..Default::default()
         },
     )
@@ -677,15 +742,14 @@ fn seed_plan(
 #[allow(clippy::too_many_arguments)]
 fn chain(
     cli: &RunArgs,
-    districts: usize,
     steps: u64,
-    package: &dra::Package,
     artifacts: &Artifacts,
     ctx: Arc<Context>,
     order: Arc<Vec<u32>>,
     seed_assignments: &[u32],
-    started: Instant,
-) -> Result<()> {
+    index: usize,
+    dir: &std::path::Path,
+) -> Result<Summary> {
     // rustrecom builds its own graph, so it owns its own invariants. The
     // document below is the only interchange structure in the run, and it is
     // built once, in memory.
@@ -730,15 +794,15 @@ fn chain(
         max_pop: ((1.0 + cli.tolerance) * ideal).floor() as u32,
         balance_ub: cli.balance_ub.unwrap_or(0),
         num_steps: steps,
-        rng_seed: cli.rng_seed,
+        rng_seed: chain_seed(cli, index),
         variant: variant_of(cli.variant),
         region_weights: (!region_weights.is_empty()).then_some(region_weights),
         edge_weight_keys: Vec::new(),
     };
 
-    let scores = File::create(cli.out.join("scores.csv"))
-        .with_context(|| format!("creating {}", cli.out.join("scores.csv").display()))?;
-    let by_district = File::create(cli.out.join("by_district.jsonl"))?;
+    let scores = File::create(dir.join("scores.csv"))
+        .with_context(|| format!("creating {}", dir.join("scores.csv").display()))?;
+    let by_district = File::create(dir.join("by_district.jsonl"))?;
     let plans = if artifacts.wants(Artifact::Plans) {
         Some(File::create(artifacts.path(Artifact::Plans))?)
     } else {
@@ -777,22 +841,77 @@ fn chain(
     )
     .map_err(|e| anyhow!("the chain stopped: {e}"))?;
 
-    let summary = summary.lock().expect("summary");
+    let summary = Arc::try_unwrap(summary)
+        .map_err(|_| anyhow!("the chain outlived its writer"))?
+        .into_inner()
+        .expect("summary");
     if let Some(e) = &summary.error {
         bail!("scoring failed at {e}");
     }
-    manifest::write(cli, districts, steps, package, &ctx, &summary, started, &cli.out.join("manifest.json"))?;
+    if cli.chains > 1 {
+        eprintln!("chain {}: scored {} plans", index + 1, summary.scored);
+    }
+    Ok(summary)
+}
+
+/// Report what the run says about itself, and write the manifest.
+#[allow(clippy::too_many_arguments)]
+fn report_convergence(
+    cli: &RunArgs,
+    districts: usize,
+    steps: u64,
+    package: &dra::Package,
+    ctx: &Context,
+    artifacts: &Artifacts,
+    summaries: &[Summary],
+    started: Instant,
+) -> Result<()> {
+    let series: Vec<_> = summaries.iter().map(|s| s.series.clone()).collect();
+    let report = crate::diagnostics::Report::build(&series);
+    let scored: u64 = summaries.iter().map(|s| s.scored).sum();
+    let taken = summaries.iter().map(|s| s.steps).max().unwrap_or(0);
 
     eprintln!(
-        "scored {} plans, from steps 0 to {}, in {:.1}s",
-        summary.scored,
-        summary.steps,
+        "\nscored {scored} plans over {} chain(s), to step {taken}, in {:.1}s",
+        summaries.len(),
         started.elapsed().as_secs_f64()
     );
+    eprint!("{}", report.render());
+
+    let combined = Summary {
+        steps: taken,
+        scored,
+        error: None,
+        series: Default::default(),
+    };
+    manifest::write(
+        cli,
+        districts,
+        steps,
+        package,
+        ctx,
+        &combined,
+        started,
+        &cli.out.join("manifest.json"),
+    )?;
+
+    let path = cli.out.join("diagnostics.json");
+    let mut file = File::create(&path)
+        .with_context(|| format!("creating {}", path.display()))?;
+    serde_json::to_writer_pretty(&mut file, &report.to_value())?;
+    file.write_all(b"\n")?;
+
     eprintln!("\nwrote {}", cli.out.display());
-    eprintln!("  scores.csv          one row per scored plan");
-    eprintln!("  by_district.jsonl   the same plans, district by district");
+    let inside = if cli.chains > 1 {
+        eprintln!("  chain_1/ .. chain_{}/  one directory per chain, each holding:", cli.chains);
+        "    "
+    } else {
+        ""
+    };
+    eprintln!("  {inside}scores.csv          one row per scored plan");
+    eprintln!("  {inside}by_district.jsonl   the same plans, district by district");
     eprintln!("  manifest.json       what this run was, so it can be repeated");
+    eprintln!("  diagnostics.json    R-hat and effective sample size, per score");
     for what in Artifact::ALL {
         if artifacts.wants(what) {
             eprintln!("  {:<20}{}", what.file_name(), what.describe());

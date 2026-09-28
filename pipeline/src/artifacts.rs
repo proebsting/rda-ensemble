@@ -91,6 +91,14 @@ impl Artifacts {
         Artifacts { dir: dir.to_path_buf(), keep: keep.iter().copied().collect() }
     }
 
+    /// The same choices, writing into a different directory.
+    ///
+    /// A run of several chains writes the state-level artifacts once and the
+    /// per-chain ones -- seed plan, ReCom graph, plans -- under each chain.
+    pub fn relocated(&self, dir: &Path) -> Artifacts {
+        Artifacts { dir: dir.to_path_buf(), keep: self.keep.clone() }
+    }
+
     pub fn wants(&self, what: Artifact) -> bool {
         self.keep.contains(&what)
     }

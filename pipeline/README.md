@@ -214,6 +214,7 @@ loosen it: the chain will move away from the starting plan anyway.
 | `--rng-seed <N>` | the seed; same seed and parameters reproduce the ensemble |
 | `--region-weights <COL=W>` | required by, and only used by, the region-aware variants |
 | `--balance-ub <N>` | required by, and only used by, `--variant reversible` |
+| `--chains <N>` | independent chains, each from its own starting plan. Default `1`; `4` lets R-hat work. They run in parallel |
 | `--threads <N>` | default `1` |
 | `--batch-size <N>` | default `1`; only matters above one thread |
 
@@ -341,6 +342,41 @@ Ask for plans, not steps. `--plans 10000 --sample-every 200` is the same run
 as `--steps 2000000 --sample-every 200`, but `--steps 10000 --sample-every
 200` — the literal reading of "10,000 plans at 200 to 1" — quietly gives you
 fifty.
+
+## Has it run long enough?
+
+Every run writes `diagnostics.json` and prints a summary. Two different
+questions live there, and the first is the one that misleads:
+
+```
+convergence
+  R-hat        1.004 at worst, on average_margin   (4 chains of 500)
+  effective N  142 at worst, on opportunity_districts   (of 500 sampled)
+```
+
+**Effective N** is how many independent draws the sample is worth, from the
+integrated autocorrelation time. Consecutive ReCom plans differ in two
+districts, so they are correlated, and 500 sampled plans can be worth 142.
+
+**R-hat** asks whether the chain saw the whole distribution, and one chain
+cannot answer it — a chain stuck in one corner has perfectly uncorrelated
+samples *from that corner*. `--chains 4` runs four chains from four different
+starting plans, in parallel, and compares them. Below 1.01 they agree; above,
+they do not, and the run needs to be longer.
+
+Measured on Michigan, everything else equal:
+
+| | worst R-hat | |
+| --- | --- | --- |
+| 4 chains x 2,000 steps | 1.061 | not converged |
+| 4 chains x 25,000 steps | 1.004 | converged |
+
+Nothing else in the output distinguishes those two runs. Both finish, both
+produce a full CSV, and only one of them is worth drawing conclusions from.
+
+Scores that do not depend on the districting — statewide vote share, for
+instance — are skipped rather than diagnosed, since they are the same in
+every plan.
 
 ## Sampling
 
