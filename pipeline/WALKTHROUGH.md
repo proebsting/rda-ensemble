@@ -600,8 +600,8 @@ remove the question, at the cost of control that most users do not want.
 
 ### A long run looks like a hung one
 
-The Michigan ensemble above — 10,000 plans at 200 to 1 — is two million steps
-and takes about half an hour. Between "running 2000000 steps" and the end,
+The Michigan ensemble — 10,000 plans at 200 to 1 — is two million steps and
+takes 9 minutes 30 seconds. Between "running 2000000 steps" and the end,
 nothing was printed. The progress bar is now on by default at a terminal, and
 `--no-progress` turns it off, but the underlying point stands: nothing warns
 you before you start that the run you have asked for is a long one.

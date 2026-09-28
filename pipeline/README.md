@@ -328,10 +328,13 @@ one. Measured, on an M-series Mac:
 | | |
 | --- | --- |
 | NC, 1,000 plans at 10:1 (10,000 steps) | 2 seconds |
-| MI, 10,000 plans at 200:1 (2,000,000 steps) | about half an hour |
+| MI, 10,000 plans at 200:1 (2,000,000 steps) | 9 min 30 s |
+
+Scoring runs on its own thread while the chain keeps going, so the two overlap
+and a long run costs less than multiplying the two rates suggests.
 
 That second one is why the progress bar is on by default at a terminal. A
-chain with no output is indistinguishable from a hung one, and half an hour is
+chain with no output is indistinguishable from a hung one, and ten minutes is
 long enough that somebody will reasonably kill it.
 
 Ask for plans, not steps. `--plans 10000 --sample-every 200` is the same run
