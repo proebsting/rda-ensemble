@@ -127,7 +127,11 @@ pub struct Cycle {
 /// dataset for 2020 that is not voting-age. That keeps the choice driven by
 /// the data rather than by a naming convention which a future export could
 /// perfectly well change.
-pub fn for_cycle(doc: &Value, year: i64) -> Result<Cycle> {
+pub fn for_cycle(
+    doc: &Value,
+    year: i64,
+    given: [Option<&str>; 3],
+) -> Result<Cycle> {
     let Some(datasets) = doc.get("datasets").and_then(|d| d.as_object()) else {
         bail!("the GeoJSON has no datasets object; is this a DRA export?");
     };
@@ -175,11 +179,17 @@ pub fn for_cycle(doc: &Value, year: i64) -> Result<Cycle> {
         }
     };
 
+    // Only work out what the command line did not already say. Naming
+    // --census explicitly should settle the question for census, even where
+    // the year has two candidates and the cycle alone could not choose.
+    let [want_census, want_vap, want_cvap] = given;
     let mut missing = Vec::new();
-    for (kind, flag) in
-        [(Kind::Census, "--census"), (Kind::Vap, "--vap"), (Kind::Cvap, "--cvap")]
-    {
-        if candidates(kind).is_empty() {
+    for (kind, flag, given) in [
+        (Kind::Census, "--census", want_census),
+        (Kind::Vap, "--vap", want_vap),
+        (Kind::Cvap, "--cvap", want_cvap),
+    ] {
+        if given.is_none() && candidates(kind).is_empty() {
             missing.push(flag);
         }
     }
@@ -201,9 +211,15 @@ pub fn for_cycle(doc: &Value, year: i64) -> Result<Cycle> {
         );
     }
 
+    let resolve = |kind: Kind, flag: &str, given: Option<&str>| -> Result<String> {
+        match given {
+            Some(name) => Ok(name.to_string()),
+            None => pick(kind, flag),
+        }
+    };
     Ok(Cycle {
-        census: pick(Kind::Census, "--census")?,
-        vap: pick(Kind::Vap, "--vap")?,
-        cvap: pick(Kind::Cvap, "--cvap")?,
+        census: resolve(Kind::Census, "--census", want_census)?,
+        vap: resolve(Kind::Vap, "--vap", want_vap)?,
+        cvap: resolve(Kind::Cvap, "--cvap", want_cvap)?,
     })
 }

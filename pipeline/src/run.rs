@@ -277,7 +277,11 @@ fn read_state(
     // --cycle picks the three demographic datasets out of the file; naming
     // one explicitly overrides that choice.
     let picked = match cli.cycle {
-        Some(year) => Some(crate::datasets::for_cycle(&doc, year)?),
+        Some(year) => Some(crate::datasets::for_cycle(
+            &doc,
+            year,
+            [cli.census.as_deref(), cli.vap.as_deref(), cli.cvap.as_deref()],
+        )?),
         None => None,
     };
     let census = resolve("--census", cli.census.as_deref(), picked.as_ref().map(|c| &c.census))?;
