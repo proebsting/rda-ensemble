@@ -16,7 +16,63 @@ One binary. No Python, no shell script, no intermediate files.
 
 ## Quick start
 
-Two commands. The first tells you what the second needs.
+Nothing but the binary. It fetches the data itself.
+
+```sh
+rda-ensemble run \
+  --state NC --plan-type congress --cycle 2020 \
+  --elections E_16-20_COMP \
+  --seed-tolerance 0.01 \
+  --steps 10000 --variant cut-edges-ust --tolerance 0.05 --rng-seed 1 \
+  --out results
+```
+
+```
+no --geojson; asking DRA what it has for NC
+  downloading NC v07 (4.6 MB)
+  ...
+  adjacency from dra-data/NC_v07/NC_2020_graph.json, matching the shapes exactly
+  2666 precincts, 1 election(s)
+```
+
+The package lands in `dra-data/` and is reused, so a second run does not
+download again.
+
+## Getting the data
+
+`rda-ensemble states` lists what DRA publishes — 52 states including DC and
+Puerto Rico, with the newest version of each and its size:
+
+```
+  state  latest       size   older
+  AK     v07          2.6M   v06
+  AR     v06          2.9M   -
+  IL     v07          7.7M   v06
+  NC     v07          4.6M   v06
+```
+
+Versions are not uniform: most states are at `v07`, eleven are still at `v06`.
+Nothing makes you guess — leave `--dra-version` out and the newest is used.
+`rda-ensemble fetch --state IL` downloads without running anything.
+
+## What is in the package
+
+Each DRA zip holds a GeoJSON and an adjacency graph. `--adjacency` says which
+the run uses:
+
+| | |
+| --- | --- |
+| `auto` (default) | DRA's graph when there is one, the shapes otherwise — and it compares the two, reporting any disagreement |
+| `dra` | DRA's graph, failing if absent |
+| `geometry` | derived from the precinct shapes, ignoring any published graph |
+
+The two have agreed exactly on every state checked — NC, IL and MI, node for
+node, including the `OUT_OF_STATE` border node — so `auto` is a guard against
+a future divergence rather than a live concern. Deriving from the shapes is
+what lets the tool work on a GeoJSON that arrives without a graph.
+
+To use a file you already have, pass `--geojson`; a `*_graph.json` beside it is
+picked up automatically.
 
 ```sh
 rda-ensemble datasets NC.geojson

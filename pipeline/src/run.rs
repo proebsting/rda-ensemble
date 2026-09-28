@@ -25,7 +25,8 @@ use crate::artifacts::{Artifact, Artifacts};
 use crate::manifest;
 use crate::scoring::{ScoringWriter, Summary};
 use crate::settings::Settings;
-use crate::{RunArgs, Variant};
+use crate::dra;
+use crate::{Adjacency, RunArgs, Variant};
 
 /// Node attribute names on the ReCom graph. Fixed, because nothing outside
 /// this binary reads them: the graph is built and consumed in one process.
@@ -40,13 +41,14 @@ pub fn run(cli: &RunArgs, keep: &[Artifact]) -> Result<()> {
         .with_context(|| format!("creating {}", cli.out.display()))?;
     let artifacts = Artifacts::new(&cli.out, keep);
 
-    let Some(ctx) = read_state(cli, districts, &artifacts)? else {
+    let package = resolve_input(cli)?;
+    let Some(ctx) = read_state(cli, districts, &package, &artifacts)? else {
         return Ok(());
     };
     let ctx = Arc::new(ctx);
     let (order, seed_assignments) = seed_plan(cli, districts, &ctx, &artifacts)?;
     let order = Arc::new(order);
-    chain(cli, districts, &artifacts, ctx.clone(), order, &seed_assignments, started)
+    chain(cli, districts, &package, &artifacts, ctx.clone(), order, &seed_assignments, started)
 }
 
 /// How many districts to draw.
@@ -126,6 +128,97 @@ fn check(cli: &RunArgs, districts: usize) -> Result<()> {
     Ok(())
 }
 
+/// The GeoJSON to read, downloading it if the command line named no file.
+fn resolve_input(cli: &RunArgs) -> Result<dra::Package> {
+    if let Some(path) = &cli.geojson {
+        // DRA ships its graph beside the GeoJSON; look for it there.
+        let graph = path.parent().and_then(|dir| {
+            std::fs::read_dir(dir).ok()?.flatten().find_map(|e| {
+                let p = e.path();
+                p.file_name()?.to_str()?.ends_with("_graph.json").then_some(p)
+            })
+        });
+        return Ok(dra::Package { geojson: path.clone(), graph, version: "local".into() });
+    }
+
+    eprintln!("no --geojson; asking DRA what it has for {}", cli.state);
+    let inventory = dra::Inventory::fetch()?;
+    let (version, size) = match &cli.dra_version {
+        Some(v) if inventory.has(&cli.state, v) => (v.clone(), 0),
+        Some(v) => bail!(
+            "DRA has no {v} for {}; it has {}",
+            cli.state,
+            inventory.versions(&cli.state).join(", ")
+        ),
+        None => inventory.latest(&cli.state)?,
+    };
+    dra::fetch(&cli.cache, &cli.state, &version, size)
+}
+
+/// Precinct adjacency, from DRA's graph or from the shapes.
+///
+/// They have agreed exactly on every state checked -- NC, IL and MI, node
+/// for node -- but DRA's is the published artefact, so `auto` prefers it and
+/// says so when the two disagree rather than letting a difference pass.
+fn adjacency(
+    cli: &RunArgs,
+    package: &dra::Package,
+    geoids: &[String],
+    geometries: &[rdarust_geo::Geometry],
+) -> Result<Vec<(String, Vec<String>)>> {
+    let published = match (cli.adjacency, &package.graph) {
+        (Adjacency::Geometry, _) => None,
+        (_, Some(path)) => Some(
+            rdarust_io::load_graph(path)
+                .map_err(|e| anyhow!("{e}"))
+                .with_context(|| format!("reading {}", path.display()))?,
+        ),
+        (Adjacency::Dra, None) => bail!(
+            "--adjacency dra, but no *_graph.json sits beside the GeoJSON. \
+             DRA ships one in each package; `--adjacency geometry` derives it instead."
+        ),
+        (Adjacency::Auto, None) => None,
+    };
+
+    let Some(published) = published else {
+        eprintln!("  adjacency derived from the precinct shapes");
+        return Ok(rdarust_io::extract_graph(geoids, geometries));
+    };
+
+    if cli.adjacency == Adjacency::Dra {
+        eprintln!("  adjacency from {}", package.graph.as_ref().expect("checked").display());
+        return Ok(published);
+    }
+
+    // Auto: the geometry graph costs little, since extraction builds the
+    // same coverage anyway, so compare rather than trust.
+    let derived = rdarust_io::extract_graph(geoids, geometries);
+    let name = package.graph.as_ref().expect("checked").display();
+    match disagreements(&published, &derived) {
+        0 => eprintln!("  adjacency from {name}, matching the shapes exactly"),
+        n => eprintln!(
+            "warning: {name} and the precinct shapes disagree about {n} node(s). \
+             Using the published graph; --adjacency geometry uses the shapes."
+        ),
+    }
+    Ok(published)
+}
+
+/// Nodes whose neighbour sets differ between two graphs.
+fn disagreements(a: &[(String, Vec<String>)], b: &[(String, Vec<String>)]) -> usize {
+    use std::collections::{BTreeMap, BTreeSet};
+    let index = |g: &[(String, Vec<String>)]| -> BTreeMap<String, BTreeSet<String>> {
+        g.iter().map(|(k, v)| (k.clone(), v.iter().cloned().collect())).collect()
+    };
+    let (a, b) = (index(a), index(b));
+    a.keys()
+        .chain(b.keys())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .filter(|k| a.get(*k) != b.get(*k))
+        .count()
+}
+
 /// Read the GeoJSON and turn it into a scoring context.
 ///
 /// This is rdarust's `map-data`, `extract-graph` and `extract-data` in one
@@ -134,9 +227,10 @@ fn check(cli: &RunArgs, districts: usize) -> Result<()> {
 fn read_state(
     cli: &RunArgs,
     districts: usize,
+    package: &dra::Package,
     artifacts: &Artifacts,
 ) -> Result<Option<Context>> {
-    let path = &cli.geojson;
+    let path = &package.geojson;
     eprintln!("reading {}", path.display());
     let text = std::fs::read_to_string(path)
         .with_context(|| format!("reading {}", path.display()))?;
@@ -160,7 +254,7 @@ fn read_state(
     // Check the dataset names before anything else reads them. A name that
     // is not in the file would otherwise sail through extraction and fail
     // much later, inside a scoring formula, where the message means nothing.
-    check_datasets(&doc, cli, &census, &vap, &cvap, &elections)?;
+    check_datasets(&doc, path, &census, &vap, &cvap, &elections)?;
 
     let mut warnings = Vec::new();
     let data_map = rdarust_io::map_data(
@@ -223,7 +317,7 @@ fn read_state(
         .collect();
     let geometries: Vec<_> = features.iter().map(|f| f.geometry.clone()).collect();
 
-    let graph = rdarust_io::extract_graph(&geoids, &geometries);
+    let graph = adjacency(cli, package, &geoids, &geometries)?;
     if artifacts.wants(Artifact::Graph) {
         let mut obj = serde_json::Map::new();
         for (geoid, neighbours) in &graph {
@@ -405,7 +499,7 @@ fn resolve(flag: &str, given: Option<&str>, picked: Option<&String>) -> Result<S
 
 fn check_datasets(
     doc: &Value,
-    cli: &RunArgs,
+    geojson: &std::path::Path,
     census: &str,
     vap: &str,
     cvap: &str,
@@ -437,7 +531,7 @@ fn check_datasets(
                 "{flag} {name} is not in the GeoJSON.\nAvailable: {}\n\
                  `rda-ensemble datasets {}` describes each one.",
                 listing(prefix),
-                cli.geojson.display()
+                geojson.display()
             );
         }
     }
@@ -455,7 +549,7 @@ fn check_datasets(
                  `--elections all` takes them all.",
                 missing.join(", "),
                 listing("E_"),
-                cli.geojson.display()
+                geojson.display()
             );
         }
     }
@@ -540,9 +634,11 @@ fn seed_plan(
 }
 
 /// Run the chain, scoring plans as they arrive.
+#[allow(clippy::too_many_arguments)]
 fn chain(
     cli: &RunArgs,
     districts: usize,
+    package: &dra::Package,
     artifacts: &Artifacts,
     ctx: Arc<Context>,
     order: Arc<Vec<u32>>,
@@ -647,7 +743,7 @@ fn chain(
     if let Some(e) = &summary.error {
         bail!("scoring failed at {e}");
     }
-    manifest::write(cli, districts, &ctx, &summary, started, &cli.out.join("manifest.json"))?;
+    manifest::write(cli, districts, package, &ctx, &summary, started, &cli.out.join("manifest.json"))?;
 
     eprintln!(
         "scored {} plans, from steps 0 to {}, in {:.1}s",

@@ -33,19 +33,31 @@ fn fingerprint(path: &Path) -> Result<String> {
 pub fn write(
     cli: &RunArgs,
     districts: usize,
+    package: &crate::dra::Package,
     ctx: &Context,
     summary: &Summary,
     started: Instant,
     path: &Path,
 ) -> Result<()> {
     let mut input = Map::new();
-    input.insert("geojson".into(), json!(cli.geojson.display().to_string()));
+    input.insert("geojson".into(), json!(package.geojson.display().to_string()));
     input.insert(
         "geojson_fingerprint".into(),
-        match fingerprint(&cli.geojson) {
+        match fingerprint(&package.geojson) {
             Ok(f) => json!(f),
             Err(_) => Value::Null,
         },
+    );
+    // Which DRA package this came from, and where adjacency came from --
+    // neither is recoverable from the file path alone.
+    input.insert("dra_version".into(), json!(package.version));
+    input.insert(
+        "adjacency".into(),
+        json!(match (cli.adjacency, &package.graph) {
+            (crate::Adjacency::Geometry, _) => "geometry",
+            (_, Some(_)) => "dra",
+            (_, None) => "geometry",
+        }),
     );
     input.insert("state".into(), json!(cli.state));
     input.insert("plan_type".into(), json!(cli.chamber.as_str()));

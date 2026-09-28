@@ -10,6 +10,7 @@
 
 mod artifacts;
 mod datasets;
+mod dra;
 mod manifest;
 mod run;
 mod scoring;
@@ -42,6 +43,18 @@ impl Chamber {
             Chamber::Lower => "lower",
         }
     }
+}
+
+/// Where precinct adjacency comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum Adjacency {
+    /// DRA's graph when one is present, the geometry otherwise. Compares
+    /// the two when both are available.
+    Auto,
+    /// DRA's published graph. Fails when there is none.
+    Dra,
+    /// Derived from the precinct shapes, ignoring any published graph.
+    Geometry,
 }
 
 /// Which ReCom variant to run. The names match rustrecom's `--variant`.
@@ -88,6 +101,24 @@ pub enum Command {
         #[arg(value_name = "FILE")]
         geojson: PathBuf,
     },
+    /// List the states DRA publishes data for, and which versions exist.
+    States {
+        /// Just this state.
+        #[arg(long, value_name = "XX")]
+        state: Option<String>,
+    },
+    /// Download a state's data from DRA and unpack it.
+    Fetch {
+        /// Two-letter state abbreviation.
+        #[arg(long, value_name = "XX")]
+        state: String,
+        /// Which DRA version. The newest is used when this is left out.
+        #[arg(long = "dra-version", value_name = "vNN")]
+        dra_version: Option<String>,
+        /// Where packages are kept. Reused across runs.
+        #[arg(long, value_name = "DIR", default_value = "dra-data")]
+        cache: PathBuf,
+    },
     /// Generate an ensemble and score every plan.
     ///
     /// Reads one GeoJSON, builds the precinct graph, draws a
@@ -100,9 +131,26 @@ pub enum Command {
 #[derive(Debug, clap::Args)]
 pub struct RunArgs {
     // ---- what to read -----------------------------------------------------
-    /// The DRA GeoJSON for one state.
+    /// The DRA GeoJSON for one state. Left out, the state's data is
+    /// downloaded from DRA and kept in --cache.
     #[arg(long, value_name = "FILE", help_heading = "Input")]
-    pub geojson: PathBuf,
+    pub geojson: Option<PathBuf>,
+
+    /// Which DRA version to download. The newest is used when this is left
+    /// out. Ignored when --geojson names a file.
+    #[arg(long = "dra-version", value_name = "vNN", help_heading = "Input")]
+    pub dra_version: Option<String>,
+
+    /// Where downloaded packages are kept, so a second run does not
+    /// download again.
+    #[arg(long, value_name = "DIR", default_value = "dra-data", help_heading = "Input")]
+    pub cache: PathBuf,
+
+    /// Where precinct adjacency comes from. DRA ships a graph beside each
+    /// GeoJSON; `auto` uses it when there is one and derives from the
+    /// geometry when there is not, reporting any disagreement.
+    #[arg(long, value_enum, default_value_t = Adjacency::Auto, help_heading = "Input")]
+    pub adjacency: Adjacency,
 
     /// Two-letter state abbreviation, e.g. NC.
     #[arg(long, value_name = "XX", help_heading = "Input")]
@@ -318,6 +366,27 @@ fn main() {
 fn real_main(cli: Cli) -> Result<()> {
     match cli.command {
         Command::Datasets { geojson } => datasets::list(&geojson),
+        Command::States { state } => {
+            let inv = dra::Inventory::fetch()?;
+            dra::list(&inv, state.as_deref())
+        }
+        Command::Fetch { state, dra_version, cache } => {
+            let inv = dra::Inventory::fetch()?;
+            let (version, size) = match dra_version {
+                Some(v) if inv.has(&state, &v) => (v, 0),
+                Some(v) => anyhow::bail!(
+                    "DRA has no {v} for {state}; it has {}",
+                    inv.versions(&state).join(", ")
+                ),
+                None => inv.latest(&state)?,
+            };
+            let pkg = dra::fetch(&cache, &state, &version, size)?;
+            eprintln!("  {}", pkg.geojson.display());
+            if let Some(g) = &pkg.graph {
+                eprintln!("  {}", g.display());
+            }
+            Ok(())
+        }
         Command::Run(args) => {
             let keep = KeepArg::expand(&args.keep);
             run::run(&args, &keep)

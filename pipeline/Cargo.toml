@@ -29,6 +29,10 @@ partigraph = { path = "../../partigraph-rust/crates/partigraph" }
 rustrecom = { path = "../../../ext/rustrecom" }
 
 anyhow = "1"
+# Pure-Rust TLS and zip: a C toolchain is needed by neither, so the binary
+# stays one file and cross-compiles without a system OpenSSL.
+ureq = { version = "2", default-features = false, features = ["tls", "gzip"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
 clap = { version = "4", features = ["derive", "wrap_help"] }
 serde = "1"
 serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }
