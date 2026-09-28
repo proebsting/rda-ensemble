@@ -113,6 +113,18 @@ pub fn steps(cli: &RunArgs) -> Result<u64> {
 /// worse, not fail at all.
 fn check(cli: &RunArgs, districts: usize, steps: u64) -> Result<()> {
     if districts < 2 {
+        // Six states elect a single at-large representative, so asking for
+        // a congressional ensemble there is a reasonable thing to try and a
+        // confusing thing to be told about in terms of --districts, which
+        // the user very likely did not pass.
+        if cli.districts.is_none() {
+            bail!(
+                "{} {} is a single district, so there is nothing to partition \
+                 and no ensemble to build. Try --plan-type upper or lower.",
+                cli.state,
+                cli.chamber.as_str()
+            );
+        }
         bail!("--districts must be at least 2; got {districts}");
     }
     if steps == 0 {
