@@ -31,20 +31,58 @@ pub struct Inventory {
     states: BTreeMap<String, BTreeMap<String, u64>>,
 }
 
+/// How long a cached inventory is trusted.
+///
+/// DRA publishes a new version a few times a year, so a day is far fresher
+/// than the data changes, and it means a session of many runs costs one
+/// request rather than one per run.
+const INVENTORY_TTL: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
 impl Inventory {
+    /// The inventory, from the cache when it is recent enough.
+    ///
+    /// Without this every run spends one of GitHub's sixty unauthenticated
+    /// requests an hour, so building a few dozen ensembles in an afternoon
+    /// would start failing.
+    pub fn load(cache: &Path) -> Result<Inventory> {
+        let path = cache.join("inventory.json");
+        if let Ok(meta) = std::fs::metadata(&path) {
+            let fresh = meta
+                .modified()
+                .ok()
+                .and_then(|m| m.elapsed().ok())
+                .is_some_and(|age| age < INVENTORY_TTL);
+            if fresh {
+                if let Ok(body) = std::fs::read_to_string(&path) {
+                    if let Ok(inv) = Self::parse(&body) {
+                        return Ok(inv);
+                    }
+                }
+            }
+        }
+        let body = Self::download()?;
+        // Best effort: a cache that cannot be written is not a failure.
+        let _ = std::fs::create_dir_all(cache);
+        let _ = std::fs::write(&path, &body);
+        Self::parse(&body)
+    }
+
     /// Read the whole repository tree in one request.
     ///
     /// One call rather than one per state: unauthenticated GitHub allows
     /// sixty an hour, and there are fifty-two states.
-    pub fn fetch() -> Result<Inventory> {
+    fn download() -> Result<String> {
         let url = format!("https://api.github.com/repos/{REPO}/git/trees/master?recursive=1");
-        let body = ureq::get(&url)
+        ureq::get(&url)
             .set("User-Agent", "rda-ensemble")
             .call()
             .map_err(|e| explain("asking GitHub what DRA publishes", e))?
             .into_string()
-            .context("reading the repository listing")?;
-        let doc: Value = serde_json::from_str(&body).context("parsing the repository listing")?;
+            .context("reading the repository listing")
+    }
+
+    fn parse(body: &str) -> Result<Inventory> {
+        let doc: Value = serde_json::from_str(body).context("parsing the repository listing")?;
 
         if doc.get("truncated").and_then(|t| t.as_bool()) == Some(true) {
             bail!("GitHub truncated the repository listing; the inventory would be incomplete");
@@ -251,7 +289,7 @@ pub fn resolve(cache: &Path, state: &str, version: Option<&str>) -> Result<Packa
             return Ok(p);
         }
     }
-    let inventory = match Inventory::fetch() {
+    let inventory = match Inventory::load(cache) {
         Ok(i) => i,
         // Asking which version is newest needs the network; using one that
         // is already here does not. Building several ensembles for the same

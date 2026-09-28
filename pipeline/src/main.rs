@@ -115,6 +115,10 @@ pub enum Command {
         /// Just this state.
         #[arg(long, value_name = "XX")]
         state: Option<String>,
+        /// Where the listing is cached. Re-read for a day before asking
+        /// GitHub again.
+        #[arg(long, value_name = "DIR")]
+        cache: Option<PathBuf>,
     },
     /// Download a state's data from DRA and unpack it.
     Fetch {
@@ -401,8 +405,8 @@ fn real_main(cli: Cli) -> Result<()> {
             };
             datasets::list(&path)
         }
-        Command::States { state } => {
-            let inv = dra::Inventory::fetch()?;
+        Command::States { state, cache } => {
+            let inv = dra::Inventory::load(&cache.unwrap_or_else(dra::default_cache))?;
             dra::list(&inv, state.as_deref())
         }
         Command::Fetch { state, dra_version, cache } => {
