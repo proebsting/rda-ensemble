@@ -207,6 +207,7 @@ loosen it: the chain will move away from the starting plan anyway.
 | option | |
 | --- | --- |
 | `--steps <N>` | chain steps, counting rejected proposals |
+| `--plans <N>` | how many plans you want, instead of `--steps`. `--plans 10000 --sample-every 200` runs two million steps |
 | `--variant <NAME>` | which ReCom variant — see below |
 | `--tolerance <FRACTION>` | population tolerance during the chain, usually looser than `--seed-tolerance` |
 | `--target-pop <N>` | optional — ideal population per district. Defaults to the total divided by the district count |
@@ -286,7 +287,7 @@ you need one, the change is in `rdarust-io::recom`, not here.
 | `--keep <WHAT>` | also write an intermediate; repeatable, or `all` |
 | `--prefixes` | prefix each score column with the dataset it came from |
 | `--reverse-weight-splitting` | two extra county-splitting columns |
-| `--progress` | chain progress on stderr |
+| `--no-progress` | suppress the progress bar, which is otherwise shown at a terminal |
 
 ## Knowing what you got
 
@@ -317,6 +318,26 @@ Under a second on North Carolina.
 including the ones with no flag at all — majority-minority districts are
 always counted, and the score mode is always `all`, so both are recorded
 rather than left to be inferred from the columns.
+
+## How long is this going to take
+
+Scoring costs about 1.4 ms per plan and the chain itself a few microseconds
+per step, so the plan count dominates a short run and the step count a long
+one. Measured, on an M-series Mac:
+
+| | |
+| --- | --- |
+| NC, 1,000 plans at 10:1 (10,000 steps) | 2 seconds |
+| MI, 10,000 plans at 200:1 (2,000,000 steps) | about half an hour |
+
+That second one is why the progress bar is on by default at a terminal. A
+chain with no output is indistinguishable from a hung one, and half an hour is
+long enough that somebody will reasonably kill it.
+
+Ask for plans, not steps. `--plans 10000 --sample-every 200` is the same run
+as `--steps 2000000 --sample-every 200`, but `--steps 10000 --sample-every
+200` — the literal reading of "10,000 plans at 200 to 1" — quietly gives you
+fifty.
 
 ## Sampling
 

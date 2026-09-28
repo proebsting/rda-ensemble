@@ -97,9 +97,18 @@ pub enum Command {
     /// Start here. The names this prints are what `run` wants for
     /// --census, --vap, --cvap and --elections.
     Datasets {
-        /// The DRA GeoJSON for one state.
+        /// A GeoJSON to read. Left out, --state says which to download.
         #[arg(value_name = "FILE")]
-        geojson: PathBuf,
+        geojson: Option<PathBuf>,
+        /// Two-letter state abbreviation, downloaded from DRA if not cached.
+        #[arg(long, value_name = "XX", required_unless_present = "geojson")]
+        state: Option<String>,
+        /// Which DRA version. The newest is used when this is left out.
+        #[arg(long = "dra-version", value_name = "vNN")]
+        dra_version: Option<String>,
+        /// Where packages are kept.
+        #[arg(long, value_name = "DIR")]
+        cache: Option<PathBuf>,
     },
     /// List the states DRA publishes data for, and which versions exist.
     States {
@@ -115,9 +124,10 @@ pub enum Command {
         /// Which DRA version. The newest is used when this is left out.
         #[arg(long = "dra-version", value_name = "vNN")]
         dra_version: Option<String>,
-        /// Where packages are kept. Reused across runs.
-        #[arg(long, value_name = "DIR", default_value = "dra-data")]
-        cache: PathBuf,
+        /// Where packages are kept. Defaults to a per-user cache, so the
+        /// same state is downloaded once however many ensembles you build.
+        #[arg(long, value_name = "DIR")]
+        cache: Option<PathBuf>,
     },
     /// Generate an ensemble and score every plan.
     ///
@@ -143,8 +153,8 @@ pub struct RunArgs {
 
     /// Where downloaded packages are kept, so a second run does not
     /// download again.
-    #[arg(long, value_name = "DIR", default_value = "dra-data", help_heading = "Input")]
-    pub cache: PathBuf,
+    #[arg(long, value_name = "DIR", help_heading = "Input")]
+    pub cache: Option<PathBuf>,
 
     /// Where precinct adjacency comes from. DRA ships a graph beside each
     /// GeoJSON; `auto` uses it when there is one and derives from the
@@ -212,9 +222,22 @@ pub struct RunArgs {
     pub seed_tolerance: f64,
 
     // ---- the chain --------------------------------------------------------
-    /// Chain steps to run, counting rejected proposals.
+    /// Chain steps to run, counting rejected proposals. One of --steps or
+    /// --plans; --plans is usually what you mean.
+    #[arg(
+        long,
+        value_name = "N",
+        required_unless_present = "plans",
+        conflicts_with = "plans",
+        help_heading = "Chain"
+    )]
+    pub steps: Option<u64>,
+
+    /// How many plans you want in the ensemble. The chain is run for as
+    /// many steps as that needs: --plans 10000 --sample-every 200 runs two
+    /// million steps.
     #[arg(long, value_name = "N", help_heading = "Chain")]
-    pub steps: u64,
+    pub plans: Option<u64>,
 
     /// Which ReCom variant to run.
     #[arg(long, value_enum, help_heading = "Chain")]
@@ -298,9 +321,11 @@ pub struct RunArgs {
     #[arg(long, help_heading = "Output")]
     pub reverse_weight_splitting: bool,
 
-    /// Report chain progress to stderr.
+    /// Never show the progress bar. It is shown by default when stderr is
+    /// a terminal, because a long chain is otherwise indistinguishable from
+    /// a hung one.
     #[arg(long, help_heading = "Output")]
-    pub progress: bool,
+    pub no_progress: bool,
 
     /// Work out every setting, print them, and stop without running the
     /// chain. Reads the GeoJSON, so it also catches a bad dataset name.
@@ -365,22 +390,24 @@ fn main() {
 
 fn real_main(cli: Cli) -> Result<()> {
     match cli.command {
-        Command::Datasets { geojson } => datasets::list(&geojson),
+        Command::Datasets { geojson, state, dra_version, cache } => {
+            let path = match geojson {
+                Some(p) => p,
+                None => {
+                    let state = state.expect("clap requires one or the other");
+                    let cache = cache.unwrap_or_else(dra::default_cache);
+                    dra::resolve(&cache, &state, dra_version.as_deref())?.geojson
+                }
+            };
+            datasets::list(&path)
+        }
         Command::States { state } => {
             let inv = dra::Inventory::fetch()?;
             dra::list(&inv, state.as_deref())
         }
         Command::Fetch { state, dra_version, cache } => {
-            let inv = dra::Inventory::fetch()?;
-            let (version, size) = match dra_version {
-                Some(v) if inv.has(&state, &v) => (v, 0),
-                Some(v) => anyhow::bail!(
-                    "DRA has no {v} for {state}; it has {}",
-                    inv.versions(&state).join(", ")
-                ),
-                None => inv.latest(&state)?,
-            };
-            let pkg = dra::fetch(&cache, &state, &version, size)?;
+            let cache = cache.unwrap_or_else(dra::default_cache);
+            let pkg = dra::resolve(&cache, &state, dra_version.as_deref())?;
             eprintln!("  {}", pkg.geojson.display());
             if let Some(g) = &pkg.graph {
                 eprintln!("  {}", g.display());

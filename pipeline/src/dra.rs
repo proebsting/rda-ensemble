@@ -41,7 +41,7 @@ impl Inventory {
         let body = ureq::get(&url)
             .set("User-Agent", "rda-ensemble")
             .call()
-            .map_err(|e| anyhow!("asking GitHub what DRA publishes: {e}"))?
+            .map_err(|e| explain("asking GitHub what DRA publishes", e))?
             .into_string()
             .context("reading the repository listing")?;
         let doc: Value = serde_json::from_str(&body).context("parsing the repository listing")?;
@@ -112,7 +112,54 @@ fn package_url(state: &str, version: &str) -> String {
     )
 }
 
-/// Where a state's unpacked package lives under the cache.
+/// Where downloaded packages live by default.
+///
+/// A per-directory cache would re-download for every new working directory,
+/// and the same state is usually wanted for many ensembles, so this is
+/// per-user and shared.
+pub fn default_cache() -> PathBuf {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    #[cfg(target_os = "macos")]
+    let base = home.map(|h| h.join("Library/Caches"));
+    #[cfg(not(target_os = "macos"))]
+    let base = std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| home.map(|h| h.join(".cache")));
+    base.unwrap_or_else(|| PathBuf::from(".")).join("rda-ensemble")
+}
+
+/// Turn a transport failure into something a reader can act on.
+///
+/// GitHub allows sixty unauthenticated calls an hour, and a bare
+/// "status code 403" says neither that it is temporary nor that there is a
+/// way around it.
+fn explain(what: &str, e: ureq::Error) -> anyhow::Error {
+    if let ureq::Error::Status(403 | 429, response) = &e {
+        let remaining = response.header("x-ratelimit-remaining");
+        if remaining == Some("0") {
+            let mins = response
+                .header("x-ratelimit-reset")
+                .and_then(|r| r.parse::<u64>().ok())
+                .and_then(|reset| {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .ok()?
+                        .as_secs();
+                    Some(reset.saturating_sub(now).div_ceil(60))
+                });
+            return anyhow!(
+                "GitHub's rate limit for unauthenticated requests is used up{}. \n\
+                 It resets on its own; meanwhile `--geojson FILE` skips GitHub \
+                 entirely, and an already-downloaded state in the cache still works.",
+                match mins {
+                    Some(m) => format!(", and resets in about {m} minute(s)"),
+                    None => String::new(),
+                }
+            );
+        }
+    }
+    anyhow!("{what}: {e}")
+}
 pub fn cache_path(cache: &Path, state: &str, version: &str) -> PathBuf {
     cache.join(format!("{state}_{version}"))
 }
@@ -122,6 +169,22 @@ pub fn cached(cache: &Path, state: &str, version: &str) -> Option<Package> {
     let dir = cache_path(cache, state, version);
     let geojson = find(&dir, ".geojson")?;
     Some(Package { graph: find(&dir, "_graph.json"), geojson, version: version.to_string() })
+}
+
+/// The newest version of a state already in the cache.
+fn newest_cached(cache: &Path, state: &str) -> Option<Package> {
+    let prefix = format!("{state}_");
+    let mut versions: Vec<String> = std::fs::read_dir(cache)
+        .ok()?
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_str()?.to_string();
+            name.strip_prefix(&prefix).map(str::to_string)
+        })
+        .filter(|v| v.starts_with('v'))
+        .collect();
+    versions.sort();
+    cached(cache, state, versions.last()?)
 }
 
 fn find(dir: &Path, suffix: &str) -> Option<PathBuf> {
@@ -147,7 +210,7 @@ pub fn fetch(cache: &Path, state: &str, version: &str, size: u64) -> Result<Pack
     ureq::get(&url)
         .set("User-Agent", "rda-ensemble")
         .call()
-        .map_err(|e| anyhow!("downloading {url}: {e}"))?
+        .map_err(|e| explain(&format!("downloading {url}"), e))?
         .into_reader()
         .read_to_end(&mut bytes)
         .with_context(|| format!("reading {url}"))?;
@@ -174,6 +237,42 @@ pub fn fetch(cache: &Path, state: &str, version: &str, size: u64) -> Result<Pack
     cached(cache, state, version).ok_or_else(|| {
         anyhow!("{state} {version} unpacked without a .geojson; the package layout may have changed")
     })
+}
+
+/// The package for a state: from the cache when it is there, downloaded
+/// when it is not.
+///
+/// Only asks GitHub what exists when it has to, so a cached state keeps
+/// working when the rate limit is spent or the network is away.
+pub fn resolve(cache: &Path, state: &str, version: Option<&str>) -> Result<Package> {
+    if let Some(v) = version {
+        if let Some(p) = cached(cache, state, v) {
+            eprintln!("  {state} {v} already in {}", cache.display());
+            return Ok(p);
+        }
+    }
+    let inventory = match Inventory::fetch() {
+        Ok(i) => i,
+        // Asking which version is newest needs the network; using one that
+        // is already here does not. Building several ensembles for the same
+        // state should not depend on GitHub being reachable every time.
+        Err(e) => match newest_cached(cache, state) {
+            Some(p) => {
+                eprintln!("  could not reach DRA's index, using cached {state} {}", p.version);
+                return Ok(p);
+            }
+            None => return Err(e),
+        },
+    };
+    let (version, size) = match version {
+        Some(v) if inventory.has(state, v) => (v.to_string(), 0),
+        Some(v) => bail!(
+            "DRA has no {v} for {state}; it has {}",
+            inventory.versions(state).join(", ")
+        ),
+        None => inventory.latest(state)?,
+    };
+    fetch(cache, state, &version, size)
 }
 
 /// Print what DRA publishes.

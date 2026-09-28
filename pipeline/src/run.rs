@@ -35,20 +35,21 @@ const ASSIGNMENT_COL: &str = "INITIAL";
 
 pub fn run(cli: &RunArgs, keep: &[Artifact]) -> Result<()> {
     let districts = districts(cli)?;
-    check(cli, districts)?;
+    let steps = steps(cli)?;
+    check(cli, districts, steps)?;
     let started = Instant::now();
     std::fs::create_dir_all(&cli.out)
         .with_context(|| format!("creating {}", cli.out.display()))?;
     let artifacts = Artifacts::new(&cli.out, keep);
 
     let package = resolve_input(cli)?;
-    let Some(ctx) = read_state(cli, districts, &package, &artifacts)? else {
+    let Some(ctx) = read_state(cli, districts, steps, &package, &artifacts)? else {
         return Ok(());
     };
     let ctx = Arc::new(ctx);
     let (order, seed_assignments) = seed_plan(cli, districts, &ctx, &artifacts)?;
     let order = Arc::new(order);
-    chain(cli, districts, &package, &artifacts, ctx.clone(), order, &seed_assignments, started)
+    chain(cli, districts, steps, &package, &artifacts, ctx.clone(), order, &seed_assignments, started)
 }
 
 /// How many districts to draw.
@@ -82,14 +83,40 @@ pub fn districts(cli: &RunArgs) -> Result<usize> {
     }
 }
 
+/// Whether to draw rustrecom's progress bar.
+///
+/// On by default at a terminal: a two-million-step chain runs for half an
+/// hour, and with no output at all somebody will reasonably conclude it has
+/// hung and kill it.
+fn show_progress(cli: &RunArgs) -> bool {
+    use std::io::IsTerminal;
+    !cli.no_progress && std::io::stderr().is_terminal()
+}
+
+/// How many chain steps to run.
+///
+/// People think in plans and the chain counts steps, and at an interval of
+/// 200 those differ by a factor of 200. Asking for `--steps 10000
+/// --sample-every 200` when 10,000 plans were wanted gives fifty, with no
+/// error -- so `--plans` does the arithmetic.
+pub fn steps(cli: &RunArgs) -> Result<u64> {
+    match (cli.steps, cli.plans) {
+        (Some(steps), _) => Ok(steps),
+        (None, Some(plans)) => plans
+            .checked_mul(cli.sample_every)
+            .ok_or_else(|| anyhow!("--plans {plans} at --sample-every {} overflows", cli.sample_every)),
+        (None, None) => bail!("give --plans (how many you want) or --steps (how long to run)"),
+    }
+}
+
 /// Parameter checks that would otherwise fail deep inside a library, or
 /// worse, not fail at all.
-fn check(cli: &RunArgs, districts: usize) -> Result<()> {
+fn check(cli: &RunArgs, districts: usize, steps: u64) -> Result<()> {
     if districts < 2 {
         bail!("--districts must be at least 2; got {districts}");
     }
-    if cli.steps == 0 {
-        bail!("--steps must be at least 1");
+    if steps == 0 {
+        bail!("--steps and --plans must be at least 1");
     }
     if cli.sample_every == 0 {
         bail!("--sample-every must be at least 1");
@@ -141,18 +168,10 @@ fn resolve_input(cli: &RunArgs) -> Result<dra::Package> {
         return Ok(dra::Package { geojson: path.clone(), graph, version: "local".into() });
     }
 
-    eprintln!("no --geojson; asking DRA what it has for {}", cli.state);
-    let inventory = dra::Inventory::fetch()?;
-    let (version, size) = match &cli.dra_version {
-        Some(v) if inventory.has(&cli.state, v) => (v.clone(), 0),
-        Some(v) => bail!(
-            "DRA has no {v} for {}; it has {}",
-            cli.state,
-            inventory.versions(&cli.state).join(", ")
-        ),
-        None => inventory.latest(&cli.state)?,
-    };
-    dra::fetch(&cli.cache, &cli.state, &version, size)
+    // One implementation, in dra::resolve: a second copy here drifted from
+    // it and lost the offline fallback.
+    let cache = cli.cache.clone().unwrap_or_else(dra::default_cache);
+    dra::resolve(&cache, &cli.state, cli.dra_version.as_deref())
 }
 
 /// Precinct adjacency, from DRA's graph or from the shapes.
@@ -227,6 +246,7 @@ fn disagreements(a: &[(String, Vec<String>)], b: &[(String, Vec<String>)]) -> us
 fn read_state(
     cli: &RunArgs,
     districts: usize,
+    steps: u64,
     package: &dra::Package,
     artifacts: &Artifacts,
 ) -> Result<Option<Context>> {
@@ -295,7 +315,7 @@ fn read_state(
     }
     artifacts.write_json_pretty(Artifact::DataMap, &data_map)?;
 
-    report(cli, districts, &census, &vap, &cvap, &data_map_elections(&data_map));
+    report(cli, districts, steps, &census, &vap, &cvap, &data_map_elections(&data_map));
     if cli.dry_run {
         eprintln!("\n--dry-run: nothing was written");
         return Ok(None);
@@ -369,6 +389,7 @@ fn data_map_elections(data_map: &Value) -> Vec<String> {
 fn report(
     cli: &RunArgs,
     districts: usize,
+    steps: u64,
     census: &str,
     vap: &str,
     cvap: &str,
@@ -423,9 +444,12 @@ fn report(
 
     s.section("Starting plan").given("population tolerance", cli.seed_tolerance);
 
-    s.section("Chain")
-        .given("variant", cli.variant.as_str())
-        .given("steps", cli.steps)
+    s.section("Chain").given("variant", cli.variant.as_str());
+    match cli.plans {
+        Some(p) => s.derived("steps", steps, format!("--plans {p} x --sample-every {}", cli.sample_every)),
+        None => s.given("steps", steps),
+    };
+    s
         .given("population tolerance", cli.tolerance)
         .given("rng seed", cli.rng_seed);
     if cli.variant == crate::Variant::Reversible {
@@ -638,6 +662,7 @@ fn seed_plan(
 fn chain(
     cli: &RunArgs,
     districts: usize,
+    steps: u64,
     package: &dra::Package,
     artifacts: &Artifacts,
     ctx: Arc<Context>,
@@ -688,7 +713,7 @@ fn chain(
         min_pop: ((1.0 - cli.tolerance) * ideal).ceil() as u32,
         max_pop: ((1.0 + cli.tolerance) * ideal).floor() as u32,
         balance_ub: cli.balance_ub.unwrap_or(0),
-        num_steps: cli.steps,
+        num_steps: steps,
         rng_seed: cli.rng_seed,
         variant: variant_of(cli.variant),
         region_weights: (!region_weights.is_empty()).then_some(region_weights),
@@ -724,10 +749,7 @@ fn chain(
         summary.clone(),
     );
 
-    eprintln!(
-        "running {} steps, scoring every {}",
-        cli.steps, cli.sample_every
-    );
+    eprintln!("running {steps} steps, scoring every {}", cli.sample_every);
     rustrecom::recom::run::multi_chain(
         &graph,
         &partition,
@@ -735,7 +757,7 @@ fn chain(
         &params,
         cli.threads,
         cli.batch_size,
-        cli.progress,
+        show_progress(cli),
     )
     .map_err(|e| anyhow!("the chain stopped: {e}"))?;
 
@@ -743,7 +765,7 @@ fn chain(
     if let Some(e) = &summary.error {
         bail!("scoring failed at {e}");
     }
-    manifest::write(cli, districts, package, &ctx, &summary, started, &cli.out.join("manifest.json"))?;
+    manifest::write(cli, districts, steps, package, &ctx, &summary, started, &cli.out.join("manifest.json"))?;
 
     eprintln!(
         "scored {} plans, from steps 0 to {}, in {:.1}s",

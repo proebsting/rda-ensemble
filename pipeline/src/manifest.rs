@@ -30,9 +30,11 @@ fn fingerprint(path: &Path) -> Result<String> {
     Ok(format!("fnv1a64:{hash:016x}"))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn write(
     cli: &RunArgs,
     districts: usize,
+    steps: u64,
     package: &crate::dra::Package,
     ctx: &Context,
     summary: &Summary,
@@ -86,7 +88,11 @@ pub fn write(
     input.insert("expand_composites".into(), json!(cli.expand_composites));
 
     let mut chain = Map::new();
-    chain.insert("steps_requested".into(), json!(cli.steps));
+    chain.insert("steps_requested".into(), json!(steps));
+    chain.insert("plans_requested".into(), match cli.plans {
+        Some(p) => json!(p),
+        None => Value::Null,
+    });
     chain.insert("steps_taken".into(), json!(summary.steps));
     chain.insert("variant".into(), json!(cli.variant.as_str()));
     chain.insert("tolerance".into(), json!(cli.tolerance));

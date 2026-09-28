@@ -6,21 +6,19 @@ several fixes further on than the first draft.
 
 ## What you start with
 
-Two files in a directory, and nothing else installed.
+One file. The binary, and nothing else installed.
 
 ```
 $ ls -lh
--rw-r--r--  14M  NC.geojson
--rwxr-xr-x  2.1M  rda-ensemble
+-rwxr-xr-x  4.2M  rda-ensemble
 ```
 
-The GeoJSON is what DRA publishes for a state — one file holding every
-precinct's shape, population, demographics and election results. The binary is
-2.1 MB and needs no Python, no R, and no other install.
+No GeoJSON, no Python, no R. The tool fetches its own data.
 
 The user knows three things about what they want: **North Carolina**,
-**congressional districts**, and **14 of them**. They do not know what a data
-map is, what ReCom is, or what any dataset inside the file is called.
+**congressional districts**, and about **a thousand plans**. They do not know
+what a data map is, what ReCom is, what any dataset inside DRA's files is
+called, or that North Carolina has 14 congressional districts.
 
 ## Step 1: what does this thing do?
 
@@ -32,6 +30,8 @@ Usage: rda-ensemble <COMMAND>
 
 Commands:
   datasets  List the datasets a GeoJSON carries, with what each one is
+  states    List the states DRA publishes data for, and which versions exist
+  fetch     Download a state's data from DRA and unpack it
   run       Generate an ensemble and score every plan
   help      Print this message or the help of the given subcommand(s)
 
@@ -40,14 +40,17 @@ Options:
   -V, --version  Print version
 ```
 
-Two things it can do, and the first one reads like a question they have. A
+Four things it can do, and each reads like a question somebody might have. A
 wall of twenty options here would not.
 
 ## Step 2: what is in my file?
 
+`datasets` takes a state, not a path, so it works before anything is
+downloaded — the file it needs is fetched and kept.
+
 ```
-$ ./rda-ensemble datasets NC.geojson
-NC.geojson
+$ ./rda-ensemble datasets --state NC
+  downloading NC v07 (4.6 MB)
 
 Total population  (--census)
   T_22_ACS      Total Pop (ACS) 2022
@@ -67,30 +70,12 @@ Citizen voting-age population  (--cvap)
   V_19_CVAP     Citizen VAP 2019
 
 Elections  (--elections)
-  E_16-22_COMP  Composite 2016-2022
-                averages E_20_SEN, E_20_GOV, E_16_PRES, E_20_AG, E_22_SEN, E_20_PRES
-  E_22_CONG     Congress 2022
-  E_22_SC3      Supreme Court 3 2022
-  E_22_SC5      Supreme Court 5 2022
-  E_22_SEN      Senator 2022
-  E_20_AG       Attorney Gen 2020
-  E_20_AUD      Auditor 2020
-  E_20_GOV      Governor 2020
-  E_20_LTG      Lt Governor 2020
-  E_20_PRES     President 2020
-  E_20_SEN      Senator 2020
-  E_20_SOS      Sec of State 2020
-  E_20_TREAS    Treasurer 2020
+  E_24_AG       Attorney Gen 2024
+  E_24_CONG     Congress 2024
+  ...
   E_16-20_COMP  Composite 2016-2020
                 averages E_20_PRES, E_20_GOV, E_20_SEN, E_16_PRES, E_20_AG, E_16_SEN
-  E_16_AG       Attorney Gen 2016
-  E_16_GOV      Governor 2016
-  E_16_LTG      Lt Governor 2016
-  E_16_PRES     President 2016
-  E_16_SEN      Senator 2016
-  E_14_SEN      Senator 2014
-  E_12_PRES     President 2012
-  E_08_PRES     President 2008
+  ...
 
 Pass any of these names to the matching option of `rda-ensemble run`,
 or `--elections all` to score every election at once.
@@ -103,12 +88,27 @@ statewide races, rather than betting the analysis on a single election. The
 `averages` line under each composite is what makes that choice possible
 without knowing the field beforehand.
 
-The three demographic datasets no longer have to be copied out. `--cycle 2020`
+The three demographic datasets do not have to be copied out. `--cycle 2020`
 picks them, using the year DRA tags each one with. This listing is still where
 you check *what it will pick*, and it is the only place to look when a year has
 more than one candidate — 2020 carries both `T_20_CENS` and `T_20_ACS`, and the
 difference between a decennial count and an ACS estimate is not something to
 discover by accident.
+
+## Which states, and which version?
+
+```
+$ ./rda-ensemble states
+  state  latest       size   older
+  AK     v07          2.6M   v06
+  AR     v06          2.9M   -
+  NC     v07          4.6M   v06
+  ...
+```
+
+52 of them, including DC and Puerto Rico. Versions are not uniform — most
+states are at `v07`, eleven are still at `v06` — so leaving `--dra-version` out
+and taking the newest is the right default rather than a shortcut.
 
 ## Step 3: what does a run need?
 
@@ -120,13 +120,14 @@ Reads one GeoJSON, builds the precinct graph, draws a population-balanced starti
 ReCom chain, and scores plans as the chain produces them. Nothing is written between stages unless
 --keep asks for it.
 
-Usage: rda-ensemble run [OPTIONS] --geojson <FILE> --state <XX> --plan-type <NAME>
-       --elections <LIST> --seed-tolerance <FRACTION> --steps <N> --variant <VARIANT>
+Usage: rda-ensemble run [OPTIONS] --state <XX> --plan-type <NAME>
+       --elections <LIST> --seed-tolerance <FRACTION> --variant <VARIANT>
        --tolerance <FRACTION> --rng-seed <N> --out <DIR>
 
 Input:
       --geojson <FILE>
-          The DRA GeoJSON for one state
+          The DRA GeoJSON for one state. Left out, the state's data is downloaded from DRA
+          and kept in --cache
 
       --state <XX>
           Two-letter state abbreviation, e.g. NC
@@ -149,6 +150,14 @@ Datasets:
       ...
 
 Chain:
+      --steps <N>
+          Chain steps to run, counting rejected proposals. One of --steps or --plans;
+          --plans is usually what you mean
+
+      --plans <N>
+          How many plans you want in the ensemble. The chain is run for as many steps as
+          that needs: --plans 10000 --sample-every 200 runs two million steps
+
       --variant <VARIANT>
           Which ReCom variant to run
 
@@ -162,10 +171,10 @@ Chain:
 
 *(Trimmed; the real output runs to about 90 lines.)*
 
-**Ten options are required**, down from thirteen when this walkthrough was
-first written. `--districts` went, because the chamber already fixes it. The
-three dataset names went, because `--cycle` picks them. Both still exist as
-overrides.
+**Eight options are required**, down from thirteen when this walkthrough was
+first written. `--geojson` went, because the tool fetches. `--districts` went,
+because the chamber fixes it. The three dataset names went, because `--cycle`
+picks them. All still exist as overrides.
 
 The two a newcomer cannot reason about are `--variant` and the two tolerances.
 The variant list says which one is "the usual choice", which is the only steer
@@ -196,10 +205,9 @@ the three demographic ones, but `--elections` still has to be named:
 
 ```
 $ ./rda-ensemble run --elections NOPE ...
-reading NC.geojson
 rda-ensemble: --elections names NOPE that the GeoJSON does not carry.
 Available: E_08_PRES, E_12_PRES, E_14_SEN, E_16-20_COMP, E_16-22_COMP, ...
-`rda-ensemble datasets NC.geojson` describes each one, and `--elections all` takes them all.
+`rda-ensemble datasets <file>` describes each one, and `--elections all` takes them all.
 ```
 
 This one recovers itself: the list is right there, and it names the command
@@ -228,6 +236,21 @@ error: the following required arguments were not provided:
 ```
 
 Exact, and it names only what is actually missing.
+
+**Asking for a run and getting no data.** GitHub allows sixty unauthenticated
+requests an hour, and somebody experimenting can spend them:
+
+```
+rda-ensemble: GitHub's rate limit for unauthenticated requests is used up, and
+resets in about 29 minute(s).
+It resets on its own; meanwhile `--geojson FILE` skips GitHub entirely, and an
+already-downloaded state in the cache still works.
+```
+
+It says the three things worth knowing: that it is temporary, roughly how
+temporary, and that there are two ways past it. A state already in the cache
+keeps working, because asking which version is newest needs the network but
+using one already downloaded does not.
 
 Typing `rda-ensemble` with no arguments prints the help rather than an error,
 which is the right thing for somebody poking at an unfamiliar binary.
@@ -258,7 +281,7 @@ Starting plan
 
 Chain
   variant                   cut-edges-ust
-  steps                     10000
+  steps                     10000               --plans 1000 x --sample-every 10
   population tolerance      0.05
   rng seed                  1
   threads                   1
@@ -292,8 +315,8 @@ $ ./rda-ensemble run \
     --state NC --plan-type congress --cycle 2020 \
     --elections E_16-20_COMP \
     --seed-tolerance 0.01 \
-    --steps 10000 --variant cut-edges-ust --tolerance 0.05 --rng-seed 1 \
-    --sample-every 10 \
+    --plans 1000 --sample-every 10 \
+    --variant cut-edges-ust --tolerance 0.05 --rng-seed 1 \
     --out results
 
 reading NC.geojson
@@ -334,8 +357,11 @@ Why the remaining settings:
 - `--tolerance 0.05` — five percent during the chain, looser than the one
   percent the starting plan was drawn to. Congressional districts are held to
   much tighter in law, but a chain needs room to move.
-- `--sample-every 10` so 10,000 steps give 1,000 rows rather than 10,000.
-  Consecutive plans differ in only two districts.
+- `--plans 1000 --sample-every 10`, which is 10,000 chain steps. Asking for
+  plans rather than steps is the point: consecutive plans differ in only two
+  districts, so sampling is normal, and `--steps 1000 --sample-every 10` —
+  the literal reading of "1,000 plans at 10 to 1" — would quietly give a
+  hundred.
 - `--elections E_16-20_COMP` from step 2, a composite of six statewide races
   rather than betting the analysis on one election. This one stays explicit on
   purpose: which races to analyse is a judgement, not a consequence of the
@@ -443,7 +469,7 @@ is why the key says so.
 
 ## Where it still trips people up
 
-Writing this walkthrough turned up more than I expected, and four of them are
+Writing this walkthrough turned up more than I expected, and six of them are
 now fixed. What follows is the state after those fixes, with the struck-through
 headings kept so the reasoning is still readable.
 
@@ -518,6 +544,33 @@ the candidates and stops rather than choosing.
 `--elections` is deliberately not part of it. Which races to analyse is a
 judgement, not a consequence of the decade.
 
+### ~~Everything needed a GeoJSON you had to find yourself~~ — fixed
+
+The first draft of this walkthrough began with two files in a directory and
+said nothing about where the GeoJSON came from. That was the largest gap in
+it: DRA publishes 52 states at versions that differ state by state, and
+rdapy's own download script makes `--version` mandatory with no way to
+discover it, so anybody following the instructions guessed and got a 404.
+
+`states` lists what exists, `fetch` downloads, and `run` and `datasets` do it
+themselves when no file is named. Leave `--dra-version` out and the newest is
+used. Packages are kept in a per-user cache, so building six ensembles for
+one state downloads once.
+
+### ~~Plans and steps were easy to confuse~~ — fixed
+
+"Ten thousand plans sampled at 200 to 1" is two million chain steps, and the
+tool only took steps. Typing the sentence literally — `--steps 10000
+--sample-every 200` — gave fifty plans, with no error and no warning, after a
+run that looked entirely successful. That is the only failure found in this
+walkthrough that produced a wrong answer rather than a message.
+
+`--plans` now does the arithmetic and the settings block shows its working:
+
+```
+  steps                     2000000             --plans 10000 x --sample-every 200
+```
+
 ### ~~No way to tell what the shorthand expanded to~~ — fixed
 
 A consequence of the two fixes above: by the time a run needed only ten
@@ -545,6 +598,14 @@ the same kind of thing at different moments. I expect people to swap them. A
 single `--tolerance` with the starting plan drawn tighter automatically would
 remove the question, at the cost of control that most users do not want.
 
+### A long run looks like a hung one
+
+The Michigan ensemble above — 10,000 plans at 200 to 1 — is two million steps
+and takes about half an hour. Between "running 2000000 steps" and the end,
+nothing was printed. The progress bar is now on by default at a terminal, and
+`--no-progress` turns it off, but the underlying point stands: nothing warns
+you before you start that the run you have asked for is a long one.
+
 ### Nothing says how many steps is enough
 
 This is the real scientific gap. `--steps 10000` was picked because it is a
@@ -557,8 +618,6 @@ needs a convergence statistic in the output.
 
 - `--rng-seed` is required with no hint about what to choose. It wants a line
   saying any number will do, and to write it down.
-- Getting the GeoJSON in the first place is not covered anywhere. This
-  walkthrough starts with the file already present.
 - What to *do* with `scores.csv` is not covered either. The tool produces an
   ensemble; the analysis is left to the reader.
 - A macOS user who downloads the binary will hit Gatekeeper before any of this,
