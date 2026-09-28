@@ -143,23 +143,73 @@ loosen it: the chain will move away from the starting plan anyway.
 | `--steps <N>` | chain steps, counting rejected proposals |
 | `--variant <NAME>` | which ReCom variant — see below |
 | `--tolerance <FRACTION>` | population tolerance during the chain, usually looser than `--seed-tolerance` |
+| `--target-pop <N>` | optional — ideal population per district. Defaults to the total divided by the district count |
 | `--rng-seed <N>` | the seed; same seed and parameters reproduce the ensemble |
+| `--region-weights <COL=W>` | required by, and only used by, the region-aware variants |
 | `--balance-ub <N>` | required by, and only used by, `--variant reversible` |
 | `--threads <N>` | default `1` |
 | `--batch-size <N>` | default `1`; only matters above one thread |
 
-The variants:
+All seven of rustrecom's variants:
 
 - `cut-edges-ust` — the usual choice. Accepts most proposals, so it explores
   quickly.
+- `cut-edges-region-aware` — the same, but prefers cuts that leave a region
+  whole. This is how you run a chain that tries not to split counties.
 - `reversible` — samples the intended distribution exactly, at the cost of
   rejecting most proposals. Needs `--balance-ub` and a lot more steps: a few
   hundred may accept nothing at all.
-- `district-pairs-ust`, `cut-edges-rmst`, `district-pairs-rmst` — variations
-  on how district pairs and spanning trees are chosen.
+- `district-pairs-ust`, `cut-edges-mst`, `district-pairs-mst`,
+  `district-pairs-region-aware` — variations on how district pairs and
+  spanning trees are chosen.
 
 `--threads` above 1 is faster but changes which plans a given `--rng-seed`
 produces. Leave it at 1 for a run anybody needs to reproduce.
+
+#### Keeping counties whole
+
+```sh
+rda-ensemble run ... \
+  --variant cut-edges-region-aware \
+  --region-weights COUNTY=1.0
+```
+
+`COUNTY` is a node attribute the dual graph always carries: each precinct's
+five-character FIPS code. The sampler prefers cuts whose two ends sit in
+different counties, which is to say cuts that leave counties whole. Higher
+weights press harder.
+
+On North Carolina, 2,000 steps, everything else equal:
+
+| | counties split, mean | splitting rating, mean |
+| --- | --- | --- |
+| `cut-edges-ust` | 48.9 | 1.1 |
+| `cut-edges-region-aware`, `COUNTY=1.0` | 10.2 | 65.6 |
+
+`--region-weights` is repeatable and comma-separated, and takes any node
+attribute the graph carries — today that is `COUNTY` and `GEOID`, and
+weighting `GEOID` does nothing useful since it is unique per node. Weights
+are applied most-important-first, as rustrecom orders them.
+
+Passing weights to a variant that cannot use them is refused rather than
+ignored, because rustrecom panics on that combination.
+
+### What of rustrecom is not reachable
+
+Most of rustrecom's chain options map onto the table above. Five do not,
+and it is worth saying why rather than leaving you to guess:
+
+| rustrecom | why not |
+| --- | --- |
+| `--config`, `--graph-json`, `--pop-col`, `--assignment-col`, `--overwrite-output` | this tool builds the graph and names its own columns; there is nothing to point at |
+| `--constraint` | its one constraint reads two node attributes as a ratio, and the dual graph carries no demographic columns to read |
+| `--sum-cols` | same: nothing to sum |
+| `--edge-weight-keys` | needs per-edge attributes, and the dual graph carries none. rdarust has the shared-perimeter lengths that would go there |
+| `--writer`, `--cut-edges-count`, `--bendl-graph-order` | scoring replaces rustrecom's writers, so its output formats never run |
+
+The first row is structural. The rest are not refusals in principle — each
+needs the dual graph or the writer to carry something it does not yet. If
+you need one, the change is in `rdarust-io::recom`, not here.
 
 ### Output
 
