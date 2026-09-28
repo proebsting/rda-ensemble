@@ -57,6 +57,16 @@ That writes three files into `results/`:
 
 North Carolina, 2,666 precincts, 10,000 steps: about two seconds.
 
+## A worked walkthrough
+
+[**NC Ensemble Walkthrough**](https://claude.ai/code/artifact/421da95c-eb4d-4f13-9059-c10354fc402f)
+follows somebody who has never run this before, from two files in a directory
+to a scored ensemble — including the attempts that fail and what the errors
+say. Every command and every output in it was actually run.
+
+Read that if you would rather see the tool used than read its options. The
+rest of this page is the reference.
+
 ## Finding the dataset names
 
 The four dataset options are the ones people get stuck on, because the names
