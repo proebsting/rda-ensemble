@@ -94,9 +94,6 @@ fn check(cli: &RunArgs, districts: usize) -> Result<()> {
             bail!("{name} must be a fraction between 0 and 1; got {value}");
         }
     }
-    if cli.elections.is_empty() {
-        bail!("--elections needs at least one dataset name, or `all`");
-    }
     if cli.threads == 0 {
         bail!("--threads must be at least 1");
     }

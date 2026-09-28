@@ -135,7 +135,13 @@ pub struct RunArgs {
 
     /// Election datasets to score, comma separated. Use `all` for every
     /// election the GeoJSON carries.
-    #[arg(long, value_name = "LIST", value_delimiter = ',', help_heading = "Datasets")]
+    #[arg(
+        long,
+        value_name = "LIST",
+        value_delimiter = ',',
+        required = true,
+        help_heading = "Datasets"
+    )]
     pub elections: Vec<String>,
 
     /// Also score each election that a composite averages, on its own.

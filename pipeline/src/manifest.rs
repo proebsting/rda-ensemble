@@ -57,9 +57,16 @@ pub fn write(
         json!(if cli.districts.is_some() { "--districts" } else { "statutory" }),
     );
     input.insert("precincts".into(), json!(ctx.n_precincts()));
-    input.insert("census".into(), json!(cli.census));
-    input.insert("vap".into(), json!(cli.vap));
-    input.insert("cvap".into(), json!(cli.cvap));
+    // The datasets actually used, not the flags asked for: --cycle leaves
+    // the flags unset, and a manifest that cannot say which data produced
+    // an ensemble is not worth writing.
+    input.insert("cycle".into(), match cli.cycle {
+        Some(year) => json!(year),
+        None => Value::Null,
+    });
+    input.insert("census".into(), json!(ctx.keys.census));
+    input.insert("vap".into(), json!(ctx.keys.vap));
+    input.insert("cvap".into(), json!(ctx.keys.cvap));
     input.insert("elections".into(), json!(ctx.keys.elections));
     input.insert("expand_composites".into(), json!(cli.expand_composites));
 
