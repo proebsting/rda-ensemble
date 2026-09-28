@@ -212,6 +212,9 @@ fn read_state(cli: &RunArgs, districts: usize, artifacts: &Artifacts) -> Result<
         .with_graph(graph)
         .into_context(&cli.state, cli.chamber.as_str(), Some(districts as u32))
         .map_err(|e| anyhow!("{e}"))?;
+    for w in &ctx.warnings {
+        eprintln!("warning: {w}");
+    }
     Ok(ctx)
 }
 
