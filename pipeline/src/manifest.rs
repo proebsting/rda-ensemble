@@ -84,6 +84,11 @@ pub fn write(
         Some(m) => json!(m),
         None => Value::Null,
     });
+    chain.insert("region_weights".into(), json!(cli.region_weights));
+    chain.insert("target_pop".into(), match cli.target_pop {
+        Some(p) => json!(p),
+        None => Value::Null,
+    });
     chain.insert("threads".into(), json!(cli.threads));
     chain.insert("batch_size".into(), json!(cli.batch_size));
 

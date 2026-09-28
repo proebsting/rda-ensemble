@@ -98,6 +98,25 @@ fn check(cli: &RunArgs, districts: usize) -> Result<()> {
             bail!("{name} must be a fraction between 0 and 1; got {value}");
         }
     }
+    // rustrecom panics rather than returns for these combinations, and a
+    // panic inside a library call takes the whole process with it.
+    let region_aware = matches!(
+        cli.variant,
+        crate::Variant::CutEdgesRegionAware | crate::Variant::DistrictPairsRegionAware
+    );
+    if !cli.region_weights.is_empty() && !region_aware {
+        bail!(
+            "--region-weights only does anything for --variant cut-edges-region-aware \
+             or district-pairs-region-aware; {} ignores it",
+            cli.variant.as_str()
+        );
+    }
+    parse_region_weights(&cli.region_weights)?;
+    if let Some(pop) = cli.target_pop {
+        if pop == 0 {
+            bail!("--target-pop must be greater than zero");
+        }
+    }
     if cli.threads == 0 {
         bail!("--threads must be at least 1");
     }
@@ -318,6 +337,13 @@ fn report(
     if cli.variant == crate::Variant::Reversible {
         s.given("balance upper bound", cli.balance_ub.unwrap_or(0));
     }
+    for (col, weight) in parse_region_weights(&cli.region_weights).unwrap_or_default() {
+        s.given("region weight", format!("{col} = {weight}"));
+    }
+    match cli.target_pop {
+        Some(pop) => s.given("target population", pop),
+        None => s.derived("target population", "total / districts", "not given"),
+    };
     s.given("threads", cli.threads).given("batch size", cli.batch_size);
 
     s.section("Scoring")
@@ -330,6 +356,27 @@ fn report(
         .given("column names", if cli.prefixes { "dataset-prefixed" } else { "plain" });
 
     eprint!("{}", s.render());
+}
+
+/// `COLUMN=WEIGHT` pairs, highest weight first as rustrecom orders them.
+fn parse_region_weights(args: &[String]) -> Result<Vec<(String, f64)>> {
+    let mut out = Vec::new();
+    for arg in args {
+        let (col, weight) = arg.split_once('=').ok_or_else(|| {
+            anyhow!("--region-weights takes COLUMN=WEIGHT, e.g. COUNTY=1.0; got `{arg}`")
+        })?;
+        let weight: f64 = weight.trim().parse().map_err(|_| {
+            anyhow!("--region-weights: `{weight}` in `{arg}` is not a number")
+        })?;
+        if !weight.is_finite() || weight <= 0.0 {
+            bail!("--region-weights: the weight in `{arg}` must be positive");
+        }
+        out.push((col.trim().to_string(), weight));
+    }
+    // rustrecom orders them by descending weight, meaning most important
+    // first; match that so a run here and a run there agree.
+    out.sort_by(|a, b| b.1.total_cmp(&a.1));
+    Ok(out)
 }
 
 /// Comma-separated names, broken into lines of at most `width` characters.
@@ -510,6 +557,9 @@ fn chain(
         .zip(seed_assignments)
         .map(|(&precinct, &part)| (ctx.geoids[precinct as usize].clone(), part))
         .collect();
+    // COUNTY carries each precinct's FIPS code. The region-aware variants
+    // compare it between the ends of a candidate cut and prefer cuts whose
+    // ends differ, which is to say cuts that leave counties whole.
     let names = RecomNames {
         geoid: "GEOID",
         pop: POP_COL,
@@ -519,17 +569,25 @@ fn chain(
     let built = build_graph(&ctx, names, Some(&seed)).map_err(|e| anyhow!("{e}"))?;
     artifacts.write_json(Artifact::RecomGraph, &built.doc)?;
 
+    // Region-aware sampling reads the county column out of `graph.attr`, so
+    // it has to be loaded; nothing else needs a node attribute, and loading
+    // one costs a string per precinct.
+    let region_weights = parse_region_weights(&cli.region_weights)?;
+    let columns: Vec<String> = region_weights.iter().map(|(col, _)| col.clone()).collect();
     let (graph, partition) = rustrecom::init::from_networkx_value(
         built.doc,
         POP_COL,
         ASSIGNMENT_COL,
-        vec![],
+        columns,
         vec![],
         vec![],
     )
     .map_err(|e| anyhow!("handing the graph to rustrecom: {e}"))?;
 
-    let ideal = graph.total_pop as f64 / partition.num_dists as f64;
+    let ideal = match cli.target_pop {
+        Some(pop) => pop as f64,
+        None => graph.total_pop as f64 / partition.num_dists as f64,
+    };
     let params = RecomParams {
         min_pop: ((1.0 - cli.tolerance) * ideal).ceil() as u32,
         max_pop: ((1.0 + cli.tolerance) * ideal).floor() as u32,
@@ -537,7 +595,7 @@ fn chain(
         num_steps: cli.steps,
         rng_seed: cli.rng_seed,
         variant: variant_of(cli.variant),
-        region_weights: None,
+        region_weights: (!region_weights.is_empty()).then_some(region_weights),
         edge_weight_keys: Vec::new(),
     };
 
@@ -614,7 +672,9 @@ fn variant_of(v: Variant) -> RecomVariant {
         Variant::Reversible => RecomVariant::Reversible,
         Variant::CutEdgesUst => RecomVariant::CutEdgesUST,
         Variant::DistrictPairsUst => RecomVariant::DistrictPairsUST,
-        Variant::CutEdgesRmst => RecomVariant::CutEdgesRMST,
-        Variant::DistrictPairsRmst => RecomVariant::DistrictPairsRMST,
+        Variant::CutEdgesMst => RecomVariant::CutEdgesRMST,
+        Variant::DistrictPairsMst => RecomVariant::DistrictPairsRMST,
+        Variant::CutEdgesRegionAware => RecomVariant::CutEdgesRegionAware,
+        Variant::DistrictPairsRegionAware => RecomVariant::DistrictPairsRegionAware,
     }
 }

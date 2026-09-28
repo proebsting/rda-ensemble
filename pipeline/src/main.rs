@@ -55,10 +55,18 @@ pub enum Variant {
     CutEdgesUst,
     /// Non-reversible; district pairs chosen at random until adjacent.
     DistrictPairsUst,
-    /// Non-reversible; cut-edge pairs, trees by random minimum weight.
-    CutEdgesRmst,
-    /// Non-reversible; random pairs, trees by random minimum weight.
-    DistrictPairsRmst,
+    /// Non-reversible; cut-edge pairs, trees by random minimum weight
+    /// (ReCom-A).
+    CutEdgesMst,
+    /// Non-reversible; random pairs, trees by random minimum weight
+    /// (ReCom-B).
+    DistrictPairsMst,
+    /// Region-aware: cut-edge pairs, and cuts that keep counties whole are
+    /// preferred. Requires --county-weight.
+    CutEdgesRegionAware,
+    /// Region-aware: random pairs, and cuts that keep counties whole are
+    /// preferred. Requires --county-weight.
+    DistrictPairsRegionAware,
 }
 
 /// Redistricting ensembles from a Dave's Redistricting GeoJSON.
@@ -184,6 +192,28 @@ pub struct RunArgs {
     )]
     pub balance_ub: Option<u32>,
 
+    /// Prefer cuts that keep a region whole, as `COLUMN=WEIGHT`. Repeatable
+    /// and comma-separated; higher weights matter more. `COUNTY=1.0` is the
+    /// usual one, and COUNTY is the column the dual graph always carries.
+    /// Required by, and only used by, the region-aware variants.
+    #[arg(
+        long,
+        value_name = "COL=W",
+        value_delimiter = ',',
+        required_if_eq_any([
+            ("variant", "cut-edges-region-aware"),
+            ("variant", "district-pairs-region-aware"),
+        ]),
+        help_heading = "Chain"
+    )]
+    pub region_weights: Vec<String>,
+
+    /// Ideal population per district. Defaults to the total divided by the
+    /// district count, which is what you want unless you are deliberately
+    /// balancing against something else.
+    #[arg(long, value_name = "N", help_heading = "Chain")]
+    pub target_pop: Option<u64>,
+
     /// Worker threads for the chain. More than one is faster but changes
     /// which plans a given --rng-seed produces, so a reproducible run keeps
     /// this at 1.
@@ -238,8 +268,10 @@ impl Variant {
             Variant::Reversible => "reversible",
             Variant::CutEdgesUst => "cut-edges-ust",
             Variant::DistrictPairsUst => "district-pairs-ust",
-            Variant::CutEdgesRmst => "cut-edges-rmst",
-            Variant::DistrictPairsRmst => "district-pairs-rmst",
+            Variant::CutEdgesMst => "cut-edges-mst",
+            Variant::DistrictPairsMst => "district-pairs-mst",
+            Variant::CutEdgesRegionAware => "cut-edges-region-aware",
+            Variant::DistrictPairsRegionAware => "district-pairs-region-aware",
         }
     }
 }
