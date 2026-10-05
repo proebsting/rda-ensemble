@@ -11,7 +11,8 @@ use anyhow::{bail, Context as _, Result};
 use serde_json::Value;
 
 /// Which option a dataset belongs to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Kind {
     Census,
     Vap,
@@ -20,7 +21,8 @@ pub enum Kind {
 }
 
 impl Kind {
-    fn heading(self) -> (&'static str, &'static str) {
+    /// The heading this kind sits under, and the option it fills.
+    pub fn heading(self) -> (&'static str, &'static str) {
         match self {
             Kind::Census => ("Total population", "--census"),
             Kind::Vap => ("Voting-age population", "--vap"),
@@ -57,6 +59,7 @@ pub fn classify(name: &str, entry: &Value) -> Option<Kind> {
 ///
 /// What a caller needs to offer it as a choice: the name to pass back, what
 /// the name is for, and -- for a composite election -- what it averages.
+#[derive(serde::Serialize)]
 pub struct Dataset {
     pub kind: Kind,
     pub name: String,

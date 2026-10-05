@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The window talks to this app's own commands and listens for its events. No plugins, so nothing else is granted.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

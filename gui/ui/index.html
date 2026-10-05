@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>rda-ensemble</title>
+<style>
+  :root {
+    --bg: #fbfbfa; --panel: #fff; --ink: #1c1c1a; --dim: #6a6a66;
+    --line: #dcdcd6; --accent: #2b5f8e; --warn: #8a5a00; --bad: #9a2a2a;
+    --ok: #2a6a3a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1b1c1e; --panel: #232528; --ink: #e8e8e4; --dim: #9a9a95;
+      --line: #3a3d41; --accent: #7fb3e0; --warn: #d6a44a; --bad: #e08080;
+      --ok: #7fc08f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 13px/1.5 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+  }
+  header {
+    padding: 14px 20px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; gap: 12px;
+    position: sticky; top: 0; background: var(--bg); z-index: 5;
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  header .sub { color: var(--dim); }
+  main { padding: 18px 20px 40px; max-width: 1000px; }
+  fieldset {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    margin: 0 0 16px; padding: 14px 16px 16px;
+  }
+  legend { font-weight: 600; padding: 0 6px; }
+  .note { color: var(--dim); margin: -4px 0 12px; }
+  .grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 12px 16px;
+  }
+  label { display: block; }
+  label .name { display: block; margin-bottom: 3px; }
+  label .hint { display: block; color: var(--dim); font-size: 11.5px; margin-top: 3px; }
+  input[type=text], input[type=number], select, textarea {
+    width: 100%; padding: 5px 7px; border: 1px solid var(--line);
+    border-radius: 4px; background: var(--bg); color: var(--ink);
+    font: inherit;
+  }
+  select[multiple] { height: 108px; }
+  textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .checks { display: flex; flex-wrap: wrap; gap: 6px 18px; }
+  .checks label { display: flex; align-items: center; gap: 6px; }
+  .req { color: var(--bad); }
+  button {
+    font: inherit; padding: 6px 14px; border-radius: 5px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+    cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  #bar {
+    height: 8px; background: var(--line); border-radius: 4px; overflow: hidden;
+    flex: 1; min-width: 160px;
+  }
+  #bar div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+  #log {
+    margin-top: 12px; background: var(--bg); border: 1px solid var(--line);
+    border-radius: 4px; padding: 8px 10px; height: 230px; overflow-y: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px; white-space: pre-wrap;
+  }
+  #log .w { color: var(--warn); }
+  #log .e { color: var(--bad); }
+  #log .k { color: var(--ok); }
+  .msg { margin-top: 10px; }
+  .msg.warn { color: var(--warn); }
+  .msg.bad { color: var(--bad); }
+  .msg.ok { color: var(--ok); }
+  ul.warnings { margin: 8px 0 0; padding-left: 18px; color: var(--warn); }
+</style>
+</head>
+<body>
+<header>
+  <h1>rda-ensemble</h1>
+  <span class="sub">redistricting ensembles from Dave&rsquo;s Redistricting data</span>
+</header>
+
+<main>
+  <!-- Settings file first: it is how most people will start. -->
+  <fieldset>
+    <legend>Settings file</legend>
+    <p class="note">
+      A settings file holds every decision below and none of your paths, so it
+      can be sent to someone else. A <code>manifest.json</code> from anyone&rsquo;s
+      output directory can be loaded here too.
+    </p>
+    <div class="row">
+      <button id="load">Load settings&hellip;</button>
+      <button id="save">Download settings</button>
+      <input type="file" id="file" accept=".json,application/json" hidden>
+      <span id="fileMsg" class="sub"></span>
+    </div>
+    <ul class="warnings" id="portability"></ul>
+  </fieldset>
+
+  <fieldset>
+    <legend>Data</legend>
+    <p class="note">Which state, which published package, and where precinct
+      adjacency comes from.</p>
+    <div class="grid">
+      <label><span class="name">State <span class="req">*</span></span>
+        <select id="state"></select>
+        <span class="hint" id="stateHint">from DRA&rsquo;s index</span></label>
+      <label><span class="name">DRA version</span>
+        <select id="dra_version"></select>
+        <span class="hint">pin one, or newest is used</span></label>
+      <label><span class="name">Adjacency</span>
+        <select id="adjacency">
+          <option value="auto">auto &mdash; DRA&rsquo;s graph if present</option>
+          <option value="dra">dra &mdash; require the published graph</option>
+          <option value="geometry">geometry &mdash; derive from shapes</option>
+        </select></label>
+      <label><span class="name">Chamber <span class="req">*</span></span>
+        <select id="plan_type">
+          <option value="congress">congress</option>
+          <option value="upper">upper</option>
+          <option value="lower">lower</option>
+        </select></label>
+      <label><span class="name">Districts</span>
+        <input type="number" id="districts" min="2" placeholder="statutory count">
+        <span class="hint">blank uses the chamber&rsquo;s real count</span></label>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Datasets</legend>
+    <p class="note">
+      Give a census cycle, or name all three demographic datasets.
+      <button id="loadDatasets" style="padding:2px 8px">Read this state&rsquo;s datasets</button>
+    </p>
+    <div class="grid">
+      <label><span class="name">Cycle</span>
+        <input type="number" id="cycle" placeholder="2020">
+        <span class="hint">picks the three below for that year</span></label>
+      <label><span class="name">Census</span><select id="census"></select></label>
+      <label><span class="name">Voting-age pop</span><select id="vap"></select></label>
+      <label><span class="name">Citizen VAP</span><select id="cvap"></select></label>
+      <label><span class="name">Elections <span class="req">*</span></span>
+        <select id="elections" multiple></select>
+        <span class="hint">several may be chosen</span></label>
+      <label><span class="name">&nbsp;</span>
+        <div class="checks">
+          <label><input type="checkbox" id="expand_composites"> Expand composites</label>
+        </div>
+        <span class="hint">score a composite&rsquo;s members separately</span></label>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Starting plan</legend>
+    <div class="grid">
+      <label><span class="name">Population tolerance <span class="req">*</span></span>
+        <input type="number" id="seed_tolerance" step="0.001" placeholder="0.01">
+        <span class="hint">how balanced the first plan must be</span></label>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Chain</legend>
+    <div class="grid">
+      <label><span class="name">Plans</span>
+        <input type="number" id="plans" min="1" placeholder="how many you want">
+        <span class="hint">or give steps instead</span></label>
+      <label><span class="name">Steps</span>
+        <input type="number" id="steps" min="1" placeholder="chain steps">
+        <span class="hint">plans &times; sample every</span></label>
+      <label><span class="name">Sample every <span class="req">*</span></span>
+        <input type="number" id="sample_every" min="1"></label>
+      <label><span class="name">Variant <span class="req">*</span></span>
+        <select id="variant">
+          <option value="cut-edges-ust">cut-edges-ust &mdash; the usual choice</option>
+          <option value="cut-edges-region-aware">cut-edges-region-aware</option>
+          <option value="district-pairs-ust">district-pairs-ust</option>
+          <option value="district-pairs-region-aware">district-pairs-region-aware</option>
+          <option value="cut-edges-mst">cut-edges-mst</option>
+          <option value="district-pairs-mst">district-pairs-mst</option>
+          <option value="reversible">reversible &mdash; needs balance bound</option>
+        </select></label>
+      <label><span class="name">Population tolerance <span class="req">*</span></span>
+        <input type="number" id="tolerance" step="0.001" placeholder="0.05"></label>
+      <label><span class="name">RNG seed <span class="req">*</span></span>
+        <input type="number" id="rng_seed" min="0">
+        <span class="hint">any number; write it down</span></label>
+      <label><span class="name">Chains</span>
+        <input type="number" id="chains" min="1">
+        <span class="hint">4 lets R-hat work</span></label>
+      <label><span class="name">Segment steps</span>
+        <input type="number" id="segment_steps" min="1" placeholder="not segmented">
+        <span class="hint">needed to stop a run; changes the ensemble</span></label>
+      <label><span class="name">Balance upper bound</span>
+        <input type="number" id="balance_ub" min="0" placeholder="reversible only"></label>
+      <label><span class="name">Region weights</span>
+        <input type="text" id="region_weights" placeholder="COUNTY=1.0">
+        <span class="hint">comma separated; region-aware variants only</span></label>
+      <label><span class="name">Target population</span>
+        <input type="number" id="target_pop" min="1" placeholder="total / districts"></label>
+      <label><span class="name">Threads</span>
+        <input type="number" id="threads" min="1">
+        <span class="hint">above 1 is not reproducible</span></label>
+      <label><span class="name">Batch size</span>
+        <input type="number" id="batch_size" min="1">
+        <span class="hint">only matters above one thread</span></label>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Output</legend>
+    <div class="grid">
+      <label><span class="name">Output directory <span class="req">*</span></span>
+        <input type="text" id="out" placeholder="/path/to/results">
+        <span class="hint">not saved in the settings file</span></label>
+      <label><span class="name">Package cache</span>
+        <input type="text" id="cache">
+        <span class="hint">not saved in the settings file</span></label>
+    </div>
+    <div style="margin-top:12px">
+      <span class="name">Keep intermediates</span>
+      <div class="checks" id="keep" style="margin-top:4px"></div>
+    </div>
+    <div class="checks" style="margin-top:12px">
+      <label><input type="checkbox" id="prefixes"> Prefix score columns with their dataset</label>
+      <label><input type="checkbox" id="reverse_weight_splitting"> Reverse-weight county splitting</label>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Run</legend>
+    <div class="row">
+      <button id="check">Check settings</button>
+      <button id="start" class="primary">Run</button>
+      <button id="stop" disabled>Stop</button>
+      <div id="bar"><div></div></div>
+      <span id="pct" class="sub"></span>
+    </div>
+    <div id="msg" class="msg"></div>
+    <div id="log"></div>
+  </fieldset>
+</main>
+
+<script>
+const { invoke } = window.__TAURI__.core;
+const { listen } = window.__TAURI__.event;
+const $ = id => document.getElementById(id);
+
+// ---------------------------------------------------------------------------
+// The form, declared once.
+//
+// Every key of the Settings struct appears here exactly once, and reading and
+// writing the form both walk this list. That is what keeps the downloaded file
+// and the form from drifting apart: there is no per-field code to forget to
+// update. `audit()` below checks the list against what the backend actually
+// sends, so a field added in Rust and not here is reported rather than
+// silently dropped.
+// ---------------------------------------------------------------------------
+const FIELDS = [
+  ['state', 'str'], ['plan_type', 'str'], ['districts', 'optnum'],
+  ['dra_version', 'optstr'], ['adjacency', 'str'],
+  ['cycle', 'optnum'], ['census', 'optstr'], ['vap', 'optstr'],
+  ['cvap', 'optstr'], ['elections', 'multi'], ['expand_composites', 'bool'],
+  ['seed_tolerance', 'num'], ['steps', 'optnum'], ['plans', 'optnum'],
+  ['sample_every', 'num'], ['variant', 'str'], ['tolerance', 'num'],
+  ['rng_seed', 'num'], ['chains', 'num'], ['balance_ub', 'optnum'],
+  ['region_weights', 'csv'], ['target_pop', 'optnum'],
+  ['segment_steps', 'optnum'], ['threads', 'num'], ['batch_size', 'num'],
+  ['keep', 'checks'], ['prefixes', 'bool'], ['reverse_weight_splitting', 'bool'],
+];
+
+const KEEPS = ['data-map', 'graph', 'data', 'recom-graph', 'seed-plan', 'plans'];
+let version = 1;          // carried through from whatever was loaded
+let running = false;
+
+for (const k of KEEPS) {
+  const l = document.createElement('label');
+  l.innerHTML = `<input type="checkbox" name="keep" value="${k}"> ${k}`;
+  $('keep').appendChild(l);
+}
+
+function read(key, kind) {
+  const el = $(key);
+  switch (kind) {
+    case 'str': return el.value;
+    case 'optstr': return el.value === '' ? null : el.value;
+    case 'num': return el.value === '' ? 0 : Number(el.value);
+    case 'optnum': return el.value === '' ? null : Number(el.value);
+    case 'bool': return el.checked;
+    case 'multi': return [...el.selectedOptions].map(o => o.value);
+    case 'csv': return el.value.split(',').map(s => s.trim()).filter(Boolean);
+    case 'checks': return [...document.querySelectorAll('input[name=keep]:checked')]
+                            .map(i => i.value);
+  }
+}
+
+function write(key, kind, v) {
+  const el = $(key);
+  switch (kind) {
+    case 'str': case 'optstr': el.value = v ?? ''; break;
+    case 'num': case 'optnum': el.value = (v === null || v === undefined) ? '' : v; break;
+    case 'bool': el.checked = !!v; break;
+    case 'csv': el.value = (v || []).join(', '); break;
+    case 'multi': {
+      const want = new Set(v || []);
+      // Options are filled from the file itself when the state's datasets
+      // have not been read yet, so a loaded file is never silently emptied.
+      for (const name of want) {
+        if (![...el.options].some(o => o.value === name)) el.add(new Option(name, name));
+      }
+      for (const o of el.options) o.selected = want.has(o.value);
+      break;
+    }
+    case 'checks': {
+      const want = new Set(v || []);
+      for (const i of document.querySelectorAll('input[name=keep]')) i.checked = want.has(i.value);
+      break;
+    }
+  }
+}
+
+const collect = () => {
+  const s = { version };
+  for (const [k, kind] of FIELDS) s[k] = read(k, kind);
+  return s;
+};
+
+const fill = s => {
+  version = s.version ?? 1;
+  for (const [k, kind] of FIELDS) write(k, kind, s[k]);
+};
+
+/// Report any Settings field the form does not cover, rather than dropping it.
+function audit(defaults) {
+  const mine = new Set(FIELDS.map(([k]) => k));
+  mine.add('version');
+  const missing = Object.keys(defaults).filter(k => !mine.has(k));
+  if (missing.length) {
+    say(`This build has settings the window does not show: ${missing.join(', ')}. ` +
+        `They will keep their defaults. Please report this.`, 'bad');
+  }
+}
+
+// --- log and status --------------------------------------------------------
+function log(line, cls) {
+  const el = document.createElement('div');
+  if (cls) el.className = cls;
+  el.textContent = line;
+  $('log').appendChild(el);
+  $('log').scrollTop = $('log').scrollHeight;
+}
+const say = (text, cls) => { $('msg').textContent = text; $('msg').className = 'msg ' + (cls || ''); };
+
+// --- menus -----------------------------------------------------------------
+let inventory = [];
+
+async function loadStates() {
+  try {
+    inventory = await invoke('states', { cache: $('cache').value || null });
+    const keep = $('state').value;
+    $('state').innerHTML = '<option value=""></option>';
+    for (const r of inventory) $('state').add(new Option(r.state, r.state));
+    $('state').value = keep;
+    $('stateHint').textContent = `${inventory.length} states published`;
+    versionsFor($('state').value);
+  } catch (e) {
+    $('stateHint').textContent = 'could not reach DRA';
+    log(String(e), 'e');
+  }
+}
+
+function versionsFor(state) {
+  const row = inventory.find(r => r.state === state);
+  const keep = $('dra_version').value;
+  $('dra_version').innerHTML = '<option value="">newest</option>';
+  if (row) for (const v of [row.latest, ...row.older]) $('dra_version').add(new Option(v, v));
+  $('dra_version').value = keep;
+}
+
+async function loadDatasets() {
+  const state = $('state').value;
+  if (!state) { say('Choose a state first.', 'warn'); return; }
+  say('Reading datasets…');
+  try {
+    const rows = await invoke('datasets', {
+      state, draVersion: $('dra_version').value || null, cache: $('cache').value || null,
+    });
+    const put = (id, kind) => {
+      const keep = $(id).value;
+      $(id).innerHTML = '<option value="">from cycle</option>';
+      for (const d of rows.filter(d => d.kind === kind)) {
+        $(id).add(new Option(`${d.name} — ${d.title}`, d.name));
+      }
+      $(id).value = keep;
+    };
+    put('census', 'census'); put('vap', 'vap'); put('cvap', 'cvap');
+    const chosen = new Set([...$('elections').selectedOptions].map(o => o.value));
+    $('elections').innerHTML = '';
+    for (const d of rows.filter(d => d.kind === 'election')) {
+      const o = new Option(`${d.name} — ${d.title}`, d.name);
+      o.selected = chosen.has(d.name);
+      $('elections').add(o);
+    }
+    say(`${rows.length} datasets.`, 'ok');
+  } catch (e) { say(String(e), 'bad'); }
+}
+
+// --- settings file ---------------------------------------------------------
+$('save').onclick = async () => {
+  const s = collect();
+  const text = await invoke('settings_json', { settings: s });
+  const name = `${s.state || 'run'}-${s.plan_type}-settings.json`;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  $('fileMsg').textContent = `saved as ${name}`;
+};
+
+$('load').onclick = () => $('file').click();
+$('file').onchange = async e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  try {
+    const s = await invoke('parse_settings', { text: await f.text() });
+    fill(s);
+    versionsFor(s.state);
+    $('fileMsg').textContent = `loaded ${f.name}`;
+    say('Settings loaded. The output directory is yours to choose.', 'ok');
+    await showWarnings();
+  } catch (err) { say(String(err), 'bad'); }
+  e.target.value = '';
+};
+
+async function showWarnings() {
+  const w = await invoke('portability_warnings', { settings: collect() });
+  $('portability').innerHTML = '';
+  for (const line of w) {
+    const li = document.createElement('li');
+    li.textContent = line;
+    $('portability').appendChild(li);
+  }
+}
+
+// --- running ---------------------------------------------------------------
+function busy(on) {
+  running = on;
+  $('start').disabled = on;
+  $('check').disabled = on;
+  $('stop').disabled = !on || !$('segment_steps').value;
+}
+
+$('check').onclick = async () => {
+  if (!$('out').value) { say('An output directory is needed.', 'warn'); return; }
+  say('Checking…');
+  try {
+    await invoke('check', {
+      settings: collect(), out: $('out').value, cache: $('cache').value || null,
+    });
+    say('Settings are usable.', 'ok');
+  } catch (e) { say(String(e), 'bad'); }
+};
+
+$('start').onclick = async () => {
+  if (!$('out').value) { say('An output directory is needed.', 'warn'); return; }
+  $('log').innerHTML = '';
+  say('');
+  if (!$('segment_steps').value) {
+    log('No segment steps: this run cannot be stopped once it starts.', 'w');
+  }
+  try {
+    await invoke('start', {
+      settings: collect(), out: $('out').value, cache: $('cache').value || null,
+    });
+    busy(true);
+  } catch (e) { say(String(e), 'bad'); }
+};
+
+$('stop').onclick = async () => {
+  try { await invoke('stop'); say('Stopping at the end of this segment…', 'warn'); }
+  catch (e) { say(String(e), 'bad'); }
+};
+
+listen('status', e => log(e.payload));
+listen('warn', e => log('warning: ' + e.payload, 'w'));
+listen('progress', e => {
+  const [done, total] = e.payload;
+  $('bar').firstElementChild.style.width = (100 * done / total) + '%';
+  $('pct').textContent = `${done.toLocaleString()} / ${total.toLocaleString()} steps`;
+});
+listen('progress-done', () => { $('bar').firstElementChild.style.width = '100%'; });
+listen('done', e => {
+  busy(false);
+  if (e.payload.ok) { say('Finished.', 'ok'); log('done', 'k'); }
+  else { say(e.payload.error, 'bad'); log(e.payload.error, 'e'); }
+});
+
+// --- wiring ----------------------------------------------------------------
+$('state').onchange = () => versionsFor($('state').value);
+$('loadDatasets').onclick = loadDatasets;
+$('segment_steps').oninput = () => { if (running) busy(true); };
+for (const [k] of FIELDS) $(k).addEventListener('change', showWarnings);
+
+(async function init() {
+  const defaults = await invoke('form_defaults');
+  audit(defaults);
+  fill(defaults);
+  $('cache').value = await invoke('default_cache');
+  await loadStates();
+  await showWarnings();
+})();
+</script>
+</body>
+</html>

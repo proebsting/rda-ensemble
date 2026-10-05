@@ -1,0 +1,30 @@
+# Not a member of the rdarust workspace, for the same reason pipeline is not:
+# it depends on projects outside this repository, and the directory should
+# lift out into its own repository unchanged.
+[workspace]
+
+[package]
+name = "rda-ensemble-gui"
+description = "Build a redistricting ensemble without a terminal"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77"
+license = "MIT"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Everything this app does, the CLI does too: it is a front end, not a
+# second implementation.
+rda-ensemble = { path = "../../pipeline" }
+
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

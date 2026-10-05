@@ -131,6 +131,13 @@ pub fn write(
         json!(cli.reverse_weight_splitting),
     );
     output.insert("score_mode".into(), json!("all"));
+    // Which intermediates were written. Without this a run repeated from
+    // this manifest produces a different set of files than the run it
+    // claims to describe.
+    output.insert(
+        "kept".into(),
+        json!(cli.keep.iter().map(|k| k.as_str()).collect::<Vec<_>>()),
+    );
     output.insert("seconds".into(), json!(started.elapsed().as_secs_f64()));
 
     let mut versions = Map::new();

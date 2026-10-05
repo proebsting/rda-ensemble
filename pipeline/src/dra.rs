@@ -328,6 +328,7 @@ pub fn resolve(
 }
 
 /// What DRA publishes for one state.
+#[derive(serde::Serialize)]
 pub struct Listing {
     pub state: String,
     pub latest: String,

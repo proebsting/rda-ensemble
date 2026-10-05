@@ -37,6 +37,7 @@ pub mod manifest;
 pub mod run;
 pub mod scoring;
 pub mod seed;
+pub mod resolved;
 pub mod settings;
 
 use std::path::PathBuf;
@@ -156,6 +157,25 @@ pub enum Command {
         /// same state is downloaded once however many ensembles you build.
         #[arg(long, value_name = "DIR")]
         cache: Option<PathBuf>,
+    },
+    /// Repeat a run from a settings file, or from someone's manifest.json.
+    ///
+    /// Everything about the ensemble comes from the file. The output
+    /// directory does not, because that is yours, and neither does the
+    /// cache.
+    Replay {
+        /// A settings.json, or a manifest.json from an output directory.
+        #[arg(long, value_name = "FILE")]
+        settings: PathBuf,
+        /// Where to write the results.
+        #[arg(long, value_name = "DIR")]
+        out: PathBuf,
+        /// Where packages are kept.
+        #[arg(long, value_name = "DIR")]
+        cache: Option<PathBuf>,
+        /// Print what the file asks for and stop.
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Generate an ensemble and score every plan.
     ///
@@ -408,7 +428,22 @@ pub enum KeepArg {
 }
 
 impl KeepArg {
-    fn expand(args: &[KeepArg]) -> Vec<Artifact> {
+    /// The spelling `--keep` accepts, so a manifest can be pasted back into
+    /// a command line.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            KeepArg::All => "all",
+            KeepArg::DataMap => "data-map",
+            KeepArg::Graph => "graph",
+            KeepArg::Data => "data",
+            KeepArg::RecomGraph => "recom-graph",
+            KeepArg::SeedPlan => "seed-plan",
+            KeepArg::Plans => "plans",
+        }
+    }
+
+    /// `all` stands for every artifact; anything else is itself.
+    pub fn expand(args: &[KeepArg]) -> Vec<Artifact> {
         if args.contains(&KeepArg::All) {
             return Artifact::ALL.to_vec();
         }
@@ -455,6 +490,16 @@ pub fn real_main(cli: Cli, ev: &Sink) -> Result<()> {
                 ev.status(&format!("  {}", g.display()));
             }
             Ok(())
+        }
+        Command::Replay { settings, out, cache, dry_run } => {
+            let loaded = settings::Settings::read(&settings)?;
+            for line in loaded.portability_warnings() {
+                ev.warn(&line);
+            }
+            let mut args = loaded.into_args(out, cache)?;
+            args.dry_run = dry_run;
+            let keep = KeepArg::expand(&args.keep);
+            run::run(&args, &keep, &run::Cancel::default(), ev)
         }
         Command::Run(args) => {
             let keep = KeepArg::expand(&args.keep);

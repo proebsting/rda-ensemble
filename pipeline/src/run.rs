@@ -26,7 +26,7 @@ use crate::artifacts::{Artifact, Artifacts};
 use crate::events::Sink;
 use crate::manifest;
 use crate::scoring::{ChainState, ScoringWriter, Summary};
-use crate::settings::Settings;
+use crate::resolved::Resolved;
 use crate::dra;
 use crate::{Adjacency, RunArgs, Variant};
 
@@ -498,7 +498,7 @@ fn report(
     cvap: &str,
     elections: &[String],
 ) {
-    let mut s = Settings::default();
+    let mut s = Resolved::default();
     let from_cycle = |given: &Option<String>| match (given, cli.cycle) {
         (Some(_), _) => None,
         (None, Some(year)) => Some(format!("--cycle {year}")),
@@ -1025,6 +1025,14 @@ fn report_convergence(
         &cli.out.join("manifest.json"),
     )?;
 
+    // The same decisions as the manifest, but as the file that feeds them
+    // back in: no outcomes, no local paths, ready to hand to someone else.
+    // Written every time, because the person who will want it is usually not
+    // the person who ran this, and nobody remembers to ask for it.
+    let settings = crate::settings::Settings::from_args(cli);
+    std::fs::write(cli.out.join("settings.json"), settings.to_json())
+        .with_context(|| format!("writing {}", cli.out.join("settings.json").display()))?;
+
     let path = cli.out.join("diagnostics.json");
     let mut file = File::create(&path)
         .with_context(|| format!("creating {}", path.display()))?;
@@ -1044,6 +1052,7 @@ fn report_convergence(
     ev.status(&format!("  {inside}scores.csv          one row per scored plan"));
     ev.status(&format!("  {inside}by_district.jsonl   the same plans, district by district"));
     ev.status("  manifest.json       what this run was, so it can be repeated");
+    ev.status("  settings.json       the same decisions, to hand to someone else");
     ev.status("  diagnostics.json    R-hat and effective sample size, per score");
     for what in Artifact::ALL {
         if artifacts.wants(what) {

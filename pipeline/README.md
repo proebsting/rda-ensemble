@@ -455,6 +455,22 @@ again.
 
 ## Reproducing a run
 
+Every run writes **`settings.json`** beside its results: every decision it
+made, and none of your paths. Hand that file to someone else and
+
+```sh
+rda-ensemble replay --settings their-settings.json --out results
+```
+
+reproduces the ensemble. `replay` also reads a `manifest.json`, which is what
+people usually have, since it is written whether or not anyone thought to keep
+settings.
+
+What the file deliberately omits is the GeoJSON path, the cache directory and
+the output directory. Those differ between machines; the state and the DRA
+version are what let anyone fetch the same data. If no DRA version was pinned,
+`replay` says so before it starts.
+
 `manifest.json` is always written. It records the input file and a fingerprint
 of its contents, the state, district count and datasets, every chain
 parameter, the seed, how many plans were scored, and the versions involved.
