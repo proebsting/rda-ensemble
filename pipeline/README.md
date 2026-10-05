@@ -257,9 +257,16 @@ same `--rng-seed` at a different segment length is a different — equally
 valid — chain. Quote the segment length alongside the seed when reporting a
 result. It is in `manifest.json` either way.
 
-**There is no progress bar**, because a bar per segment would stack up. Pick N
-from how long you are willing to wait to stop: segments of a few thousand
-steps are seconds apart on a medium state.
+**The progress bar is unaffected.** It is drawn from the step numbers the
+scorer is handed, not from the segments, so it moves at the same rate either
+way:
+
+```
+  [####################--------------------]  50%  30001/60000 steps  0:08  eta 0:08
+```
+
+Pick N from how long you are willing to wait to stop — segments of a few
+thousand steps are seconds apart on a medium state.
 
 A run that stopped early records `"stopped_early": true` in its manifest, so
 a short ensemble cannot be mistaken for a complete one.
@@ -318,7 +325,7 @@ you need one, the change is in `rdarust-io::recom`, not here.
 | `--keep <WHAT>` | also write an intermediate; repeatable, or `all` |
 | `--prefixes` | prefix each score column with the dataset it came from |
 | `--reverse-weight-splitting` | two extra county-splitting columns |
-| `--no-progress` | suppress the progress bar, which is otherwise shown at a terminal |
+| `--no-progress` | suppress the progress bar, which is otherwise shown at a terminal for a single chain |
 
 ## Knowing what you got
 
@@ -367,6 +374,9 @@ and a long run costs less than multiplying the two rates suggests.
 That second one is why the progress bar is on by default at a terminal. A
 chain with no output is indistinguishable from a hung one, and ten minutes is
 long enough that somebody will reasonably kill it.
+
+There is no bar under `--chains` above 1, because several chains writing one
+line would interleave into nonsense; each reports as it finishes instead.
 
 Ask for plans, not steps. `--plans 10000 --sample-every 200` is the same run
 as `--steps 2000000 --sample-every 200`, but `--steps 10000 --sample-every

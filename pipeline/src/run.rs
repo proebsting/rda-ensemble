@@ -845,7 +845,13 @@ fn chain(
     };
     // Outlives the segments: rustrecom takes the writer and closes it at the
     // end of each call, but the files and the step cursor carry on.
-    let state = Arc::new(Mutex::new(ChainState::new(&ctx, scores, by_district, plans)));
+    let state = Arc::new(Mutex::new(ChainState::new(
+        &ctx,
+        scores,
+        by_district,
+        plans,
+        Progress::new(steps, show_progress(cli) && cli.chains == 1),
+    )));
 
     let opts = ScoreOptions {
         mode: ModeOpt::default(),
@@ -887,9 +893,10 @@ fn chain(
             &params,
             cli.threads,
             cli.batch_size,
-            // One bar for one call. Segments would stack a bar each, so a
-            // segmented run reports at the end instead.
-            show_progress(cli) && plan.len() == 1,
+            // Never rustrecom's own bar. It is sized to one call, so a
+            // segmented run would redraw it per segment; the writer draws
+            // ours from the step numbers it is handed either way.
+            false,
         )
         .map_err(|e| anyhow!("the chain stopped: {e}"))?;
 
@@ -911,6 +918,7 @@ fn chain(
             .map_err(|e| anyhow!("resuming the chain after segment {}: {e:?}", segment + 1))?;
     }
 
+    state.lock().expect("chain state").finish();
     let mut summary = Arc::try_unwrap(state)
         .map_err(|_| anyhow!("the chain outlived its writer"))?
         .into_inner()
@@ -926,6 +934,84 @@ fn chain(
         eprintln!("chain {}: scored {} plans", index + 1, summary.scored);
     }
     Ok(summary)
+}
+
+/// The chain's progress, drawn from the step numbers the writer is handed.
+///
+/// rustrecom's own bar is a `bool` on `multi_chain` with no callback, and it
+/// is sized to one call, so a segmented run would redraw it per segment.
+/// `StatsWriter` is the callback that already exists: every accepted step and
+/// every self-loop arrives with its number, which is exactly a position. One
+/// bar then covers a segmented and an unsegmented run alike.
+///
+/// Silent with `--chains` above 1: several chains writing one line would
+/// interleave into nonsense.
+pub struct Progress {
+    total: u64,
+    started: Instant,
+    last_drawn: Instant,
+    on: bool,
+}
+
+impl Progress {
+    pub fn new(steps: u64, on: bool) -> Progress {
+        let now = Instant::now();
+        Progress { total: steps, started: now, last_drawn: now, on }
+    }
+
+    /// Redraw for `step`, at most ten times a second. A chain reports
+    /// hundreds of thousands of steps, and redrawing on each would cost more
+    /// than the step did.
+    pub fn advance(&mut self, step: u64) {
+        if !self.on {
+            return;
+        }
+        let now = Instant::now();
+        let done = (step + 1).min(self.total);
+        if done < self.total && now.duration_since(self.last_drawn).as_millis() < 100 {
+            return;
+        }
+        self.last_drawn = now;
+        let fraction = done as f64 / self.total as f64;
+        let elapsed = self.started.elapsed().as_secs_f64();
+        // Steps per second so far, projected over what is left. Early
+        // segments give a poor estimate, which is why the elapsed time is
+        // shown beside it rather than only the guess.
+        let remaining = if fraction > 0.0 {
+            elapsed / fraction - elapsed
+        } else {
+            0.0
+        };
+        let width = 40usize;
+        let filled = (fraction * width as f64).round() as usize;
+        eprint!(
+            "\r  [{}{}] {:>3.0}%  {done}/{} steps  {}  eta {}   ",
+            "#".repeat(filled),
+            "-".repeat(width - filled),
+            fraction * 100.0,
+            self.total,
+            clock(elapsed),
+            clock(remaining),
+        );
+    }
+
+    /// Clear the line, so the report that follows starts clean.
+    pub fn finish(&mut self) {
+        if self.on {
+            eprint!("\r{}\r", " ".repeat(90));
+        }
+    }
+}
+
+/// Seconds as h:mm:ss, or m:ss below an hour.
+fn clock(seconds: f64) -> String {
+    let s = seconds.max(0.0) as u64;
+    let (h, m, s) = (s / 3600, (s % 3600) / 60, s % 60);
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m}:{s:02}")
+    }
 }
 
 /// How the chain's steps divide into segments.

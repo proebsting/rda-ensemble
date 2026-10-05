@@ -93,6 +93,10 @@ pub struct ChainState {
     /// previous segment ended on, which is already in the output.
     started: bool,
 
+    /// Drawn from the step numbers below. rustrecom's own bar is per call
+    /// and has no callback, so this is the one the user sees.
+    progress: crate::run::Progress,
+
     pub summary: Summary,
 }
 
@@ -102,6 +106,7 @@ impl ChainState {
         scores: File,
         by_district: File,
         plans: Option<File>,
+        progress: crate::run::Progress,
     ) -> ChainState {
         ChainState {
             aggs: Aggregates::new(ctx),
@@ -111,6 +116,7 @@ impl ChainState {
             previous: Vec::new(),
             last_step: 0,
             started: false,
+            progress,
             summary: Summary::default(),
         }
     }
@@ -118,6 +124,11 @@ impl ChainState {
     /// The plan the chain ended on, to start the next segment from.
     pub fn current_plan(&self) -> &[u32] {
         &self.previous
+    }
+
+    /// Clear the progress line, so the closing report starts clean.
+    pub fn finish(&mut self) {
+        self.progress.finish();
     }
 }
 
@@ -293,6 +304,7 @@ impl StatsWriter for ScoringWriter {
             self.score(&mut st, step, &now).map_err(to_io)?;
         }
         st.last_step = step;
+        st.progress.advance(step);
         Ok(())
     }
 
@@ -308,6 +320,7 @@ impl StatsWriter for ScoringWriter {
         let from = st.last_step + 1;
         self.replay(&mut st, from, step).map_err(to_io)?;
         st.last_step = step;
+        st.progress.advance(step);
         Ok(())
     }
 
