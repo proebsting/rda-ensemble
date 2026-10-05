@@ -18,12 +18,13 @@ use rdarust_core::graph::{is_connected, islands};
 use rdarust_core::score::{ModeOpt, ScoreOptions};
 use rdarust_io::extract::DataMapSpec;
 use rdarust_io::{build_graph, RecomNames};
+use rustrecom::partition::Partition;
 use rustrecom::recom::{RecomParams, RecomVariant};
 use serde_json::Value;
 
 use crate::artifacts::{Artifact, Artifacts};
 use crate::manifest;
-use crate::scoring::{ScoringWriter, Summary};
+use crate::scoring::{ChainState, ScoringWriter, Summary};
 use crate::settings::Settings;
 use crate::dra;
 use crate::{Adjacency, RunArgs, Variant};
@@ -33,7 +34,27 @@ use crate::{Adjacency, RunArgs, Variant};
 const POP_COL: &str = "TOTAL_POP";
 const ASSIGNMENT_COL: &str = "INITIAL";
 
-pub fn run(cli: &RunArgs, keep: &[Artifact]) -> Result<()> {
+/// A request to stop the run.
+///
+/// rustrecom runs a chain to completion and offers no way out from inside a
+/// writer, so a run stops between segments and nowhere else. How soon that
+/// is depends on `--segment-steps`: with no segmenting there is one segment,
+/// and this is never read. Set it from a signal handler, a GUI's stop
+/// button, or anything else outside the chain.
+#[derive(Clone, Default)]
+pub struct Cancel(Arc<std::sync::atomic::AtomicBool>);
+
+impl Cancel {
+    pub fn stop(&self) {
+        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub fn stopped(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+pub fn run(cli: &RunArgs, keep: &[Artifact], cancel: &Cancel) -> Result<()> {
     let districts = districts(cli)?;
     let steps = steps(cli)?;
     check(cli, districts, steps)?;
@@ -57,7 +78,7 @@ pub fn run(cli: &RunArgs, keep: &[Artifact]) -> Result<()> {
             let ctx = ctx.clone();
             let artifacts = &artifacts;
             handles.push(scope.spawn(move || {
-                one_chain(cli, districts, steps, artifacts, ctx, i)
+                one_chain(cli, districts, steps, artifacts, ctx, i, cancel)
             }));
         }
         handles.into_iter().map(|h| h.join().expect("a chain panicked")).collect()
@@ -77,9 +98,11 @@ fn chain_dir(cli: &RunArgs, index: usize) -> std::path::PathBuf {
 }
 
 /// Seeds are derived rather than asked for, so `--rng-seed 1 --chains 4`
-/// still names the whole run with one number.
+/// still names the whole run with one number. Segment 0 is the starting
+/// plan's and the first segment's; see [`crate::seed`] for why this is a
+/// mix rather than an addition.
 fn chain_seed(cli: &RunArgs, index: usize) -> u64 {
-    cli.rng_seed.wrapping_add(index as u64)
+    crate::seed::derive(cli.rng_seed, index as u64, 0)
 }
 
 /// One chain: draw a starting plan, run it, score as it goes.
@@ -90,6 +113,7 @@ fn one_chain(
     artifacts: &Artifacts,
     ctx: Arc<Context>,
     index: usize,
+    cancel: &Cancel,
 ) -> Result<Summary> {
     let dir = chain_dir(cli, index);
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
@@ -108,6 +132,7 @@ fn one_chain(
         &seed_assignments,
         index,
         &dir,
+        cancel,
     )
 }
 
@@ -527,6 +552,15 @@ fn report(
     s
         .given("population tolerance", cli.tolerance)
         .given("rng seed", cli.rng_seed);
+    // Beside the seed, not beside --threads: the segment length is part of
+    // what produced this ensemble, not a performance setting.
+    match cli.segment_steps {
+        Some(n) => s.given(
+            "segment steps",
+            format!("{n}, in {} segment(s)", segments(steps, Some(n)).len()),
+        ),
+        None => s.derived("segment steps", "one segment", "not given"),
+    };
     if cli.variant == crate::Variant::Reversible {
         s.given("balance upper bound", cli.balance_ub.unwrap_or(0));
     }
@@ -749,6 +783,7 @@ fn chain(
     seed_assignments: &[u32],
     index: usize,
     dir: &std::path::Path,
+    cancel: &Cancel,
 ) -> Result<Summary> {
     // rustrecom builds its own graph, so it owns its own invariants. The
     // document below is the only interchange structure in the run, and it is
@@ -789,7 +824,7 @@ fn chain(
         Some(pop) => pop as f64,
         None => graph.total_pop as f64 / partition.num_dists as f64,
     };
-    let params = RecomParams {
+    let mut params = RecomParams {
         min_pop: ((1.0 - cli.tolerance) * ideal).ceil() as u32,
         max_pop: ((1.0 + cli.tolerance) * ideal).floor() as u32,
         balance_ub: cli.balance_ub.unwrap_or(0),
@@ -808,50 +843,121 @@ fn chain(
     } else {
         None
     };
+    // Outlives the segments: rustrecom takes the writer and closes it at the
+    // end of each call, but the files and the step cursor carry on.
+    let state = Arc::new(Mutex::new(ChainState::new(&ctx, scores, by_district, plans)));
 
-    let summary = Arc::new(Mutex::new(Summary::default()));
-    let writer = ScoringWriter::new(
-        ctx.clone(),
-        order,
-        ScoreOptions {
-            mode: ModeOpt::default(),
-            // On, as rdapy scores normally. `ScoreOptions::default()` has it
-            // off only because rdapy's legacy tests do.
-            mmd_scoring: true,
-            reverse_weight_splitting: cli.reverse_weight_splitting,
-            ..Default::default()
-        },
-        cli.prefixes,
-        cli.sample_every,
-        scores,
-        by_district,
-        plans,
-        summary.clone(),
-    );
+    let opts = ScoreOptions {
+        mode: ModeOpt::default(),
+        // On, as rdapy scores normally. `ScoreOptions::default()` has it
+        // off only because rdapy's legacy tests do.
+        mmd_scoring: true,
+        reverse_weight_splitting: cli.reverse_weight_splitting,
+        ..Default::default()
+    };
 
-    eprintln!("running {steps} steps, scoring every {}", cli.sample_every);
-    rustrecom::recom::run::multi_chain(
-        &graph,
-        &partition,
-        Box::new(writer),
-        &params,
-        cli.threads,
-        cli.batch_size,
-        show_progress(cli),
-    )
-    .map_err(|e| anyhow!("the chain stopped: {e}"))?;
+    let plan = segments(steps, cli.segment_steps);
+    match cli.segment_steps {
+        Some(n) => eprintln!(
+            "running {steps} steps as {} segment(s) of up to {n}, scoring every {}",
+            plan.len(),
+            cli.sample_every
+        ),
+        None => eprintln!("running {steps} steps, scoring every {}", cli.sample_every),
+    }
 
-    let summary = Arc::try_unwrap(summary)
+    let mut partition = partition;
+    let mut stopped = false;
+    for (segment, &(offset, num_steps)) in plan.iter().enumerate() {
+        params.num_steps = num_steps;
+        params.rng_seed = crate::seed::derive(cli.rng_seed, index as u64, segment as u64);
+        let writer = ScoringWriter::new(
+            ctx.clone(),
+            order.clone(),
+            opts.clone(),
+            cli.prefixes,
+            cli.sample_every,
+            offset,
+            state.clone(),
+        );
+        rustrecom::recom::run::multi_chain(
+            &graph,
+            &partition,
+            Box::new(writer),
+            &params,
+            cli.threads,
+            cli.batch_size,
+            // One bar for one call. Segments would stack a bar each, so a
+            // segmented run reports at the end instead.
+            show_progress(cli) && plan.len() == 1,
+        )
+        .map_err(|e| anyhow!("the chain stopped: {e}"))?;
+
+        if let Some(e) = &state.lock().expect("chain state").summary.error {
+            bail!("scoring failed at {e}");
+        }
+        if segment + 1 == plan.len() {
+            break;
+        }
+        if cancel.stopped() {
+            stopped = true;
+            break;
+        }
+        // Carry on from where the last segment stopped. ReCom is Markov:
+        // the next step depends on this partition and nothing else, so a
+        // segmented chain is the same chain, not an approximation of one.
+        let assignments = state.lock().expect("chain state").current_plan().to_vec();
+        partition = Partition::from_assignments(&graph, &assignments)
+            .map_err(|e| anyhow!("resuming the chain after segment {}: {e:?}", segment + 1))?;
+    }
+
+    let mut summary = Arc::try_unwrap(state)
         .map_err(|_| anyhow!("the chain outlived its writer"))?
         .into_inner()
-        .expect("summary");
-    if let Some(e) = &summary.error {
-        bail!("scoring failed at {e}");
-    }
-    if cli.chains > 1 {
+        .expect("chain state")
+        .summary;
+    summary.stopped = stopped;
+    if stopped {
+        eprintln!(
+            "  stopped early: {} steps taken, {} plans scored",
+            summary.steps, summary.scored
+        );
+    } else if cli.chains > 1 {
         eprintln!("chain {}: scored {} plans", index + 1, summary.scored);
     }
     Ok(summary)
+}
+
+/// How the chain's steps divide into segments.
+///
+/// Each entry is `(absolute offset, num_steps)` for one call to rustrecom,
+/// which numbers its own steps from zero. A segment's local step 0 is the
+/// plan the previous segment ended on -- already scored there -- so each
+/// segment advances the chain by `num_steps - 1`.
+///
+/// With no `--segment-steps` this is a single call, exactly as before.
+pub fn segments(steps: u64, segment: Option<u64>) -> Vec<(u64, u64)> {
+    let advance = match segment {
+        Some(n) if n > 0 => n,
+        // One segment covering everything. The `max(1)` keeps `steps == 1`,
+        // which is just the seed plan, from looping forever.
+        _ => steps.saturating_sub(1).max(1),
+    };
+    let last = steps.saturating_sub(1);
+    let mut out = Vec::new();
+    let mut offset = 0;
+    loop {
+        let take = last.saturating_sub(offset).min(advance);
+        out.push((offset, take + 1));
+        if take == 0 {
+            break;
+        }
+        offset += take;
+        if offset >= last {
+            break;
+        }
+    }
+    out
 }
 
 /// Report what the run says about itself, and write the manifest.
@@ -882,6 +988,9 @@ fn report_convergence(
         steps: taken,
         scored,
         error: None,
+        // Any chain stopping early makes the whole ensemble short of what
+        // was asked for, so the manifest says so for the run as a whole.
+        stopped: summaries.iter().any(|s| s.stopped),
         series: Default::default(),
     };
     manifest::write(
@@ -929,5 +1038,56 @@ fn variant_of(v: Variant) -> RecomVariant {
         Variant::DistrictPairsMst => RecomVariant::DistrictPairsRMST,
         Variant::CutEdgesRegionAware => RecomVariant::CutEdgesRegionAware,
         Variant::DistrictPairsRegionAware => RecomVariant::DistrictPairsRegionAware,
+    }
+}
+
+#[cfg(test)]
+mod segment_tests {
+    use super::segments;
+
+    /// Without --segment-steps the chain is one call, exactly as before.
+    #[test]
+    fn unsegmented_is_a_single_call() {
+        assert_eq!(segments(100, None), vec![(0, 100)]);
+        assert_eq!(segments(1, None), vec![(0, 1)]);
+    }
+
+    /// Every segment after the first re-presents the plan the previous one
+    /// ended on as its own local step 0, so the offsets overlap by one step
+    /// and the advances still add up to the steps asked for.
+    #[test]
+    fn segments_tile_the_chain_exactly() {
+        for &(steps, seg) in &[(100u64, 30u64), (100, 7), (10, 1), (1000, 999), (5, 100)] {
+            let plan = segments(steps, Some(seg));
+            let (last_offset, last_len) = *plan.last().expect("at least one");
+            assert_eq!(
+                last_offset + last_len - 1,
+                steps - 1,
+                "steps={steps} seg={seg}: chain must end on the last step"
+            );
+            // Each segment starts where the previous one ended.
+            for pair in plan.windows(2) {
+                let (off, len) = pair[0];
+                assert_eq!(pair[1].0, off + len - 1, "steps={steps} seg={seg}");
+            }
+            // No segment advances further than asked.
+            for &(_, len) in &plan {
+                assert!(len - 1 <= seg, "steps={steps} seg={seg}: segment too long");
+            }
+        }
+    }
+
+    /// A segment longer than the chain is one segment, not a hang.
+    #[test]
+    fn an_oversized_segment_is_harmless() {
+        assert_eq!(segments(10, Some(1000)), vec![(0, 10)]);
+        assert_eq!(segments(1, Some(50)), vec![(0, 1)]);
+    }
+
+    /// Zero would mean no progress per call; treat it as unsegmented rather
+    /// than looping forever.
+    #[test]
+    fn zero_is_treated_as_unsegmented() {
+        assert_eq!(segments(100, Some(0)), segments(100, None));
     }
 }

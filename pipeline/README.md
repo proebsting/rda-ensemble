@@ -215,6 +215,7 @@ loosen it: the chain will move away from the starting plan anyway.
 | `--region-weights <COL=W>` | required by, and only used by, the region-aware variants |
 | `--balance-ub <N>` | required by, and only used by, `--variant reversible` |
 | `--chains <N>` | independent chains, each from its own starting plan. Default `1`; `4` lets R-hat work. They run in parallel |
+| `--segment-steps <N>` | run the chain in segments of N steps so it can be stopped between them. **Changes the ensemble** — see below |
 | `--threads <N>` | default `1` |
 | `--batch-size <N>` | default `1`; only matters above one thread |
 
@@ -233,6 +234,35 @@ All seven of rustrecom's variants:
 
 `--threads` above 1 is faster but changes which plans a given `--rng-seed`
 produces. Leave it at 1 for a run anybody needs to reproduce.
+
+#### Stopping a run early
+
+A chain normally runs to the end and the only way out is to kill the process,
+which loses everything. `--segment-steps N` runs it in segments of N steps
+instead, and Ctrl-C stops it at the end of the current one, keeping every plan
+scored so far and writing the manifest and diagnostics as usual. A second
+Ctrl-C quits immediately.
+
+```sh
+rda-ensemble run ... --steps 2000000 --sample-every 100 --segment-steps 2000
+```
+
+This is sound rather than a fudge: ReCom is Markov, so a segment that starts
+from the plan the previous one ended on continues the same chain.
+
+Two things to know.
+
+**It changes the ensemble.** Each segment draws its own derived seed, so the
+same `--rng-seed` at a different segment length is a different — equally
+valid — chain. Quote the segment length alongside the seed when reporting a
+result. It is in `manifest.json` either way.
+
+**There is no progress bar**, because a bar per segment would stack up. Pick N
+from how long you are willing to wait to stop: segments of a few thousand
+steps are seconds apart on a medium state.
+
+A run that stopped early records `"stopped_early": true` in its manifest, so
+a short ensemble cannot be mistaken for a complete one.
 
 #### Keeping counties whole
 
@@ -421,6 +451,10 @@ parameter, the seed, how many plans were scored, and the versions involved.
 
 In a one-command tool there is no shell history to fall back on, so this is
 the only record of what produced an ensemble. Keep it with the results.
+
+Three recorded fields change the plans a given `--rng-seed` produces, so a
+reproduction has to match all three: `segment_steps`, `threads` and the DRA
+`dra_version`. `stopped_early` says whether the run finished.
 
 ## Building
 

@@ -14,6 +14,16 @@
 //! there. This mirrors rustrecom's own `--sample-interval` exactly, so
 //! `--sample-every N` here and `--sample-interval N` there select the same
 //! steps.
+//!
+//! # Why the state is shared
+//!
+//! A chain may be run in segments, so that it can be stopped between them.
+//! rustrecom takes ownership of the writer and closes it at the end of each
+//! call, but the output files, the step cursor and the plan the chain is
+//! sitting on all have to outlive a segment. They live in [`ChainState`],
+//! behind the handle that each segment's writer holds. Without that, every
+//! segment boundary would lose the self-loops straddling it and re-score the
+//! plan the previous segment ended on.
 
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -44,6 +54,10 @@ pub struct Summary {
     /// The first error scoring hit, if any. The chain cannot be stopped from
     /// inside a writer, so the rest of the run is skipped rather than scored.
     pub error: Option<String>,
+    /// Whether the run was asked to stop before it had taken every step.
+    /// A reader should not have to infer this by comparing the steps asked
+    /// for against the steps taken.
+    pub stopped: bool,
     /// Every numeric score, in sampling order, for the convergence
     /// diagnostics. Ten thousand plans of forty-odd columns is a few
     /// megabytes, so this is kept rather than re-read from the CSV.
@@ -60,6 +74,55 @@ fn sampled_steps(start: u64, end: u64, interval: u64) -> impl Iterator<Item = u6
     })
 }
 
+/// Everything about one chain that outlives a single segment.
+pub struct ChainState {
+    /// Reused across plans: aggregation is the bulk of scoring, and this
+    /// keeps it from reallocating every step.
+    aggs: Aggregates,
+
+    csv: ScoresCsv<BufWriter<File>>,
+    by_district: BufWriter<File>,
+    plans: Option<BufWriter<File>>,
+
+    /// The plan the chain is sitting on, in rustrecom's node order.
+    previous: Vec<u32>,
+    /// The last absolute step accounted for. Absolute, not per segment.
+    last_step: u64,
+    /// Whether step 0 -- the seed plan -- has been scored. Only the first
+    /// segment scores it; for every later one, `init` is handed the plan the
+    /// previous segment ended on, which is already in the output.
+    started: bool,
+
+    pub summary: Summary,
+}
+
+impl ChainState {
+    pub fn new(
+        ctx: &Context,
+        scores: File,
+        by_district: File,
+        plans: Option<File>,
+    ) -> ChainState {
+        ChainState {
+            aggs: Aggregates::new(ctx),
+            csv: ScoresCsv::new(BufWriter::new(scores)),
+            by_district: BufWriter::new(by_district),
+            plans: plans.map(BufWriter::new),
+            previous: Vec::new(),
+            last_step: 0,
+            started: false,
+            summary: Summary::default(),
+        }
+    }
+
+    /// The plan the chain ended on, to start the next segment from.
+    pub fn current_plan(&self) -> &[u32] {
+        &self.previous
+    }
+}
+
+/// One segment's view of the chain. Cheap to make: everything mutable is
+/// behind the shared handle, and everything here is read-only configuration.
 pub struct ScoringWriter {
     ctx: Arc<Context>,
     /// Precinct index for each ReCom node, so a partition maps back without
@@ -68,18 +131,14 @@ pub struct ScoringWriter {
     opts: ScoreOptions,
     mode: Mode,
     prefixes: bool,
-    /// Reused across plans: aggregation is the bulk of scoring, and this
-    /// keeps it from reallocating every step.
-    aggs: Aggregates,
-
     interval: u64,
-    previous: Vec<u32>,
-    last_step: u64,
 
-    csv: ScoresCsv<BufWriter<File>>,
-    by_district: BufWriter<File>,
-    plans: Option<BufWriter<File>>,
-    summary: Arc<Mutex<Summary>>,
+    /// The absolute step this segment's local step 0 corresponds to.
+    /// rustrecom numbers each call's steps from zero; the ensemble numbers
+    /// them from the start of the chain.
+    offset: u64,
+
+    state: Arc<Mutex<ChainState>>,
 }
 
 impl ScoringWriter {
@@ -90,12 +149,9 @@ impl ScoringWriter {
         opts: ScoreOptions,
         prefixes: bool,
         interval: u64,
-        scores: File,
-        by_district: File,
-        plans: Option<File>,
-        summary: Arc<Mutex<Summary>>,
+        offset: u64,
+        state: Arc<Mutex<ChainState>>,
     ) -> ScoringWriter {
-        let aggs = Aggregates::new(&ctx);
         let mode = *opts.mode;
         ScoringWriter {
             ctx,
@@ -103,14 +159,9 @@ impl ScoringWriter {
             opts,
             mode,
             prefixes,
-            aggs,
             interval,
-            previous: Vec::new(),
-            last_step: 0,
-            csv: ScoresCsv::new(BufWriter::new(scores)),
-            by_district: BufWriter::new(by_district),
-            plans: plans.map(BufWriter::new),
-            summary,
+            offset,
+            state,
         }
     }
 
@@ -128,35 +179,40 @@ impl ScoringWriter {
         plan
     }
 
-    fn score(&mut self, step: u64, assignments: &[u32]) -> anyhow::Result<()> {
+    fn score(
+        &self,
+        st: &mut ChainState,
+        step: u64,
+        assignments: &[u32],
+    ) -> anyhow::Result<()> {
         // A failure earlier in the run means the outputs are already
         // incomplete; do not pile more onto them.
-        if self.summary.lock().expect("summary").error.is_some() {
+        if st.summary.error.is_some() {
             return Ok(());
         }
         let name = format!("{step:06}");
         let plan = self.plan_of(assignments);
 
-        let card = match self.ctx.score_into(&plan, &self.opts, &mut self.aggs) {
+        let card = match self.ctx.score_into(&plan, &self.opts, &mut st.aggs) {
             Ok(card) => card,
             Err(e) => {
-                self.summary.lock().expect("summary").error = Some(format!("step {step}: {e}"));
+                st.summary.error = Some(format!("step {step}: {e}"));
                 return Ok(());
             }
         };
         let scores = scorecard_to_value(&card, &self.ctx.keys, self.mode);
-        let by_district = scored_aggregates_to_value(&self.aggs, &self.ctx, self.mode);
+        let by_district = scored_aggregates_to_value(&st.aggs, &self.ctx, self.mode);
 
-        self.csv.write(&name, &scores, self.prefixes)?;
-        self.record(&scores);
+        st.csv.write(&name, &scores, self.prefixes)?;
+        self.record(st, &scores);
 
         let mut rec = Map::new();
         rec.insert("_tag_".into(), json!("by-district"));
         rec.insert("name".into(), json!(name));
         rec.insert("by-district".into(), by_district);
-        write_record_sorted(&mut self.by_district, &Value::Object(rec))?;
+        write_record_sorted(&mut st.by_district, &Value::Object(rec))?;
 
-        if let Some(plans) = &mut self.plans {
+        if let Some(plans) = &mut st.plans {
             let mut assigned = Map::new();
             for (node, &district) in assignments.iter().enumerate() {
                 let geoid = &self.ctx.geoids[self.order[node] as usize];
@@ -169,46 +225,52 @@ impl ScoringWriter {
             rdarust_io::records::write_record(plans, &Value::Object(rec))?;
         }
 
-        let mut summary = self.summary.lock().expect("summary");
-        summary.scored += 1;
-        summary.steps = summary.steps.max(step);
+        st.summary.scored += 1;
+        st.summary.steps = st.summary.steps.max(step);
         Ok(())
     }
 
     /// Keep each numeric score for the diagnostics.
-    fn record(&mut self, scores: &Value) {
+    fn record(&self, st: &mut ChainState, scores: &Value) {
         let flat = flatten_scores(scores, self.prefixes);
-        let mut summary = self.summary.lock().expect("summary");
         for (name, value) in flat {
             if let Some(v) = value.as_f64() {
-                summary.series.entry(name).or_default().push(v);
+                st.summary.series.entry(name).or_default().push(v);
             }
         }
     }
 
     /// Emit the plan that was already in place for every sampled step in
     /// `start..=end`. A self-looped step is a real sample of the chain.
-    fn replay(&mut self, start: u64, end: u64) -> anyhow::Result<()> {
+    fn replay(&self, st: &mut ChainState, start: u64, end: u64) -> anyhow::Result<()> {
         let steps: Vec<u64> = sampled_steps(start, end, self.interval).collect();
         if steps.is_empty() {
             return Ok(());
         }
-        let previous = std::mem::take(&mut self.previous);
+        let previous = std::mem::take(&mut st.previous);
         for step in steps {
-            self.score(step, &previous)?;
+            self.score(st, step, &previous)?;
         }
-        self.previous = previous;
+        st.previous = previous;
         Ok(())
     }
 }
 
 impl StatsWriter for ScoringWriter {
     fn init(&mut self, _graph: &Graph, partition: &Partition) -> std::io::Result<()> {
-        self.previous = partition.assignments.clone();
-        let seed = self.previous.clone();
+        let mut st = self.state.lock().expect("chain state");
+        st.previous = partition.assignments.clone();
+        // Only the first segment has a seed plan to score. A later segment is
+        // handed the plan the previous one ended on, which was scored there;
+        // scoring it again would duplicate a row and double-count a step.
+        if st.started {
+            return Ok(());
+        }
+        st.started = true;
+        let seed = st.previous.clone();
         // Step 0 is the seed plan, always sampled, as rustrecom does.
-        self.score(0, &seed).map_err(to_io)?;
-        self.last_step = 0;
+        self.score(&mut st, 0, &seed).map_err(to_io)?;
+        st.last_step = 0;
         Ok(())
     }
 
@@ -220,14 +282,17 @@ impl StatsWriter for ScoringWriter {
         _proposal: &RecomProposal,
         _counts: &SelfLoopCounts,
     ) -> std::io::Result<()> {
+        let mut st = self.state.lock().expect("chain state");
+        let step = self.offset + step;
         // Steps between the last accepted one and this were self-loops.
-        self.replay(self.last_step + 1, step.saturating_sub(1)).map_err(to_io)?;
-        self.previous = partition.assignments.clone();
+        let from = st.last_step + 1;
+        self.replay(&mut st, from, step.saturating_sub(1)).map_err(to_io)?;
+        st.previous = partition.assignments.clone();
         if self.interval != 0 && step % self.interval == 0 {
-            let now = self.previous.clone();
-            self.score(step, &now).map_err(to_io)?;
+            let now = st.previous.clone();
+            self.score(&mut st, step, &now).map_err(to_io)?;
         }
-        self.last_step = step;
+        st.last_step = step;
         Ok(())
     }
 
@@ -238,22 +303,48 @@ impl StatsWriter for ScoringWriter {
         _partition: &Partition,
         _counts: &SelfLoopCounts,
     ) -> std::io::Result<()> {
-        self.replay(self.last_step + 1, step).map_err(to_io)?;
-        self.last_step = step;
+        let mut st = self.state.lock().expect("chain state");
+        let step = self.offset + step;
+        let from = st.last_step + 1;
+        self.replay(&mut st, from, step).map_err(to_io)?;
+        st.last_step = step;
         Ok(())
     }
 
+    /// Called at the end of every segment, not only the last. Flushing here
+    /// is what leaves a cancelled run with usable output on disk.
     fn close(&mut self) -> std::io::Result<()> {
-        self.csv.flush()?;
-        self.by_district.flush()?;
-        if let Some(plans) = &mut self.plans {
+        let mut st = self.state.lock().expect("chain state");
+        st.csv.flush()?;
+        st.by_district.flush()?;
+        if let Some(plans) = &mut st.plans {
             plans.flush()?;
         }
-        self.summary.lock().expect("summary").steps = self.last_step;
+        let last = st.last_step;
+        st.summary.steps = last;
         Ok(())
     }
 }
 
 fn to_io(e: anyhow::Error) -> std::io::Error {
     std::io::Error::other(e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sampling_grid_is_absolute_not_per_segment() {
+        // A segment starting at absolute 97, sampling every 50: the next
+        // sampled step is 100, not 97 + 50. This is what the offset buys.
+        let got: Vec<u64> = sampled_steps(98, 160, 50).collect();
+        assert_eq!(got, vec![100, 150]);
+    }
+
+    #[test]
+    fn a_segment_with_no_sampled_steps_emits_nothing() {
+        let got: Vec<u64> = sampled_steps(101, 149, 50).collect();
+        assert!(got.is_empty());
+    }
 }

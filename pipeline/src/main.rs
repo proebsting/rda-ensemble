@@ -15,6 +15,7 @@ mod dra;
 mod manifest;
 mod run;
 mod scoring;
+mod seed;
 mod settings;
 
 use std::path::PathBuf;
@@ -297,6 +298,17 @@ pub struct RunArgs {
     #[arg(long, value_name = "N", help_heading = "Chain")]
     pub target_pop: Option<u64>,
 
+    /// Run the chain in segments of this many steps, stopping between them
+    /// if asked to. Without it the chain runs in one piece and cannot be
+    /// interrupted except by killing the process.
+    ///
+    /// This changes the ensemble. Each segment draws its own derived seed,
+    /// so the same --rng-seed at a different segment length is a different
+    /// -- equally valid -- chain. It is recorded in the manifest; quote it
+    /// alongside the seed when reporting a result.
+    #[arg(long, value_name = "N", help_heading = "Chain")]
+    pub segment_steps: Option<u64>,
+
     /// Worker threads for the chain. More than one is faster but changes
     /// which plans a given --rng-seed produces, so a reproducible run keeps
     /// this at 1.
@@ -428,7 +440,24 @@ fn real_main(cli: Cli) -> Result<()> {
         }
         Command::Run(args) => {
             let keep = KeepArg::expand(&args.keep);
-            run::run(&args, &keep)
+            let cancel = run::Cancel::default();
+            // Ctrl-C asks the chain to stop at the next segment boundary and
+            // keep what it has, rather than killing the process mid-write.
+            // Without --segment-steps there is no boundary before the end,
+            // so the second Ctrl-C does what the first used to.
+            {
+                let cancel = cancel.clone();
+                let segmented = args.segment_steps.is_some();
+                let hit = std::sync::atomic::AtomicBool::new(false);
+                let _ = ctrlc::set_handler(move || {
+                    if !segmented || hit.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                        std::process::exit(130);
+                    }
+                    eprintln!("\nstopping at the end of this segment; Ctrl-C again to quit now");
+                    cancel.stop();
+                });
+            }
+            run::run(&args, &keep, &cancel)
         }
     }
 }

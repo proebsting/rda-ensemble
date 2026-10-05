@@ -36,6 +36,11 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 clap = { version = "4", features = ["derive", "wrap_help"] }
 serde = "1"
 serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }
+# Ctrl-C, so a segmented run can be stopped and keep what it has. Chosen
+# over a hand-rolled SIGINT handler because it also covers Windows console
+# events; on macOS it links Foundation, which is always present, so the
+# binary is still one self-contained file.
+ctrlc = "3"
 
 [profile.release]
 lto = "thin"

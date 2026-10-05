@@ -598,13 +598,34 @@ the same kind of thing at different moments. I expect people to swap them. A
 single `--tolerance` with the starting plan drawn tighter automatically would
 remove the question, at the cost of control that most users do not want.
 
-### A long run looks like a hung one
+### A long run looks like a hung one, and used to be unstoppable
 
 The Michigan ensemble — 10,000 plans at 200 to 1 — is two million steps and
 takes 9 minutes 30 seconds. Between "running 2000000 steps" and the end,
 nothing was printed. The progress bar is now on by default at a terminal, and
 `--no-progress` turns it off, but the underlying point stands: nothing warns
 you before you start that the run you have asked for is a long one.
+
+The worse half of this — that a run you started by mistake could only be
+killed, losing everything — is now fixed. `--segment-steps N` runs the chain
+in segments and Ctrl-C stops it at the end of the current one, keeping what
+has been scored:
+
+```
+$ rda-ensemble run ... --steps 2000000 --sample-every 100 --segment-steps 300
+running 2000000 steps as 6667 segment(s) of up to 300, scoring every 100
+^C
+stopping at the end of this segment; Ctrl-C again to quit now
+  stopped early: 20100 steps taken, 202 plans scored
+```
+
+`scores.csv`, `by_district.jsonl`, the manifest and the diagnostics are all
+written, and the manifest records `"stopped_early": true`.
+
+The cost is that the segment length changes the ensemble — each segment draws
+its own derived seed — so it has to be quoted alongside `--rng-seed`. That is
+a deliberate trade: the alternative was a fixed internal segment length nobody
+could tune, or a change to rustrecom.
 
 ### ~~Nothing says how many steps is enough~~ — fixed
 

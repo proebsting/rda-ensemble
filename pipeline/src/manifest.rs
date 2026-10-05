@@ -94,6 +94,9 @@ pub fn write(
         None => Value::Null,
     });
     chain.insert("steps_taken".into(), json!(summary.steps));
+    // Said outright, because an ensemble that stopped early is not the
+    // ensemble that was asked for and nothing else in the file says so.
+    chain.insert("stopped_early".into(), json!(summary.stopped));
     chain.insert("variant".into(), json!(cli.variant.as_str()));
     chain.insert("tolerance".into(), json!(cli.tolerance));
     chain.insert("seed_tolerance".into(), json!(cli.seed_tolerance));
@@ -105,6 +108,12 @@ pub fn write(
     chain.insert("region_weights".into(), json!(cli.region_weights));
     chain.insert("target_pop".into(), match cli.target_pop {
         Some(p) => json!(p),
+        None => Value::Null,
+    });
+    // Load-bearing for reproduction: each segment draws its own derived
+    // seed, so the segment length is part of what produced this ensemble.
+    chain.insert("segment_steps".into(), match cli.segment_steps {
+        Some(n) => json!(n),
         None => Value::Null,
     });
     chain.insert("threads".into(), json!(cli.threads));
