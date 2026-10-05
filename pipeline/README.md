@@ -453,6 +453,68 @@ file matches the CLI's byte for byte.
 can re-score an ensemble with different options without running the chain
 again.
 
+## Making an ensemble longer
+
+```sh
+rda-ensemble extend --from results --out results-longer --plans 5000
+```
+
+Reads the earlier run's settings and its last plan, copies its results into
+`--out`, and carries the *same chain* on from where it stopped. ReCom is
+Markov, so the next plan depends on the current one and nothing else: this is
+the chain continued, not a second chain started somewhere plausible. The
+original directory is left exactly as it was.
+
+The earlier run must have been made with `--keep plans`; the plan to resume
+from is otherwise not written down, and `extend` says so rather than guessing.
+
+Three things to know.
+
+**It resumes from the last plan written, not the last step taken.** At
+`--sample-every 200` those differ by up to 199 steps. The run says which step
+it is picking up from.
+
+**It is not byte-identical to one longer run.** Each extension draws seeds
+past the segments the earlier run used, so the random stream from the resume
+point differs from what a single longer run would have drawn. The chain is
+equally valid either way — the Markov property is what guarantees that — but
+do not expect the two to match. Extending the *same* ensemble twice does
+match.
+
+**Extensions chain.** `segments_taken` in the manifest is what lets a second
+extension avoid replaying the first one's stream, so extend an extension
+freely.
+
+Single-chain runs only, for now. With `--chains` it is no longer one question
+which chain an R-hat was computed over, so `extend` refuses rather than
+guessing.
+
+## What has been downloaded
+
+```sh
+rda-ensemble cache
+```
+
+```
+/Users/you/Library/Caches/rda-ensemble
+
+  state  version       size   adjacency
+  IL     v07          34.7M   DRA graph
+  MI     v06          16.0M   DRA graph
+
+  2 package(s), 50.6 MB
+  index    221 kB, re-fetched after a day
+```
+
+Packages are kept per state *and* version, so pinning `--dra-version v06`
+after using v07 leaves both. That adds up quietly — a sweep of every state is
+about 780 MB — which is why this command exists.
+
+`--forget XX` removes one state, `--forget XX --dra-version vNN` one package,
+`--forget-all` the lot, and `--forget-index` drops the cached list of what DRA
+publishes. `--cache DIR` points any of this somewhere else, as it does for
+every other subcommand.
+
 ## Reproducing a run
 
 Every run writes **`settings.json`** beside its results: every decision it

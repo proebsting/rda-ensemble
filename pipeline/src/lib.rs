@@ -33,6 +33,7 @@ pub mod datasets;
 pub mod diagnostics;
 pub mod dra;
 pub mod events;
+pub mod extend;
 pub mod manifest;
 pub mod run;
 pub mod scoring;
@@ -157,6 +158,58 @@ pub enum Command {
         /// same state is downloaded once however many ensembles you build.
         #[arg(long, value_name = "DIR")]
         cache: Option<PathBuf>,
+    },
+    /// Run an existing ensemble's chain for longer.
+    ///
+    /// Reads the settings and the last plan of an earlier run, copies its
+    /// results into a new directory, and carries the same chain on from
+    /// where it stopped. ReCom is Markov, so this is the same chain
+    /// continued, not a second one started nearby.
+    ///
+    /// The earlier run must have been made with `--keep plans`, since the
+    /// plan to carry on from is otherwise not written down.
+    Extend {
+        /// An output directory from an earlier run.
+        #[arg(long, value_name = "DIR")]
+        from: PathBuf,
+        /// Where the longer ensemble goes. The earlier results are copied
+        /// here first, so the original is left alone.
+        #[arg(long, value_name = "DIR")]
+        out: PathBuf,
+        /// How many more plans to add.
+        #[arg(long, value_name = "N", required_unless_present = "steps")]
+        plans: Option<u64>,
+        /// How many more chain steps to take, instead of --plans.
+        #[arg(long, value_name = "N")]
+        steps: Option<u64>,
+        /// Run the extension in segments, so it can be stopped.
+        #[arg(long, value_name = "N")]
+        segment_steps: Option<u64>,
+        /// Where packages are kept.
+        #[arg(long, value_name = "DIR")]
+        cache: Option<PathBuf>,
+    },
+    /// Show what has been downloaded, and remove any of it.
+    ///
+    /// Packages are kept per state and version, so pinning an older
+    /// --dra-version never evicts a newer one. Nothing is removed unless
+    /// one of the --forget options says so.
+    Cache {
+        /// Where packages are kept.
+        #[arg(long, value_name = "DIR")]
+        cache: Option<PathBuf>,
+        /// Remove this state's packages.
+        #[arg(long, value_name = "XX")]
+        forget: Option<String>,
+        /// With --forget, only this version.
+        #[arg(long = "dra-version", value_name = "vNN", requires = "forget")]
+        dra_version: Option<String>,
+        /// Remove every package.
+        #[arg(long, conflicts_with = "forget")]
+        forget_all: bool,
+        /// Also remove the cached index of what DRA publishes.
+        #[arg(long)]
+        forget_index: bool,
     },
     /// Repeat a run from a settings file, or from someone's manifest.json.
     ///
@@ -489,6 +542,36 @@ pub fn real_main(cli: Cli, ev: &Sink) -> Result<()> {
             if let Some(g) = &pkg.graph {
                 ev.status(&format!("  {}", g.display()));
             }
+            Ok(())
+        }
+        Command::Extend { from, out, plans, steps, segment_steps, cache } => {
+            extend::extend(&from, &out, plans, steps, segment_steps, cache, ev)
+        }
+        Command::Cache { cache, forget, dra_version, forget_all, forget_index } => {
+            let cache = cache.unwrap_or_else(dra::default_cache);
+            if forget.is_some() || forget_all || forget_index {
+                let gone = dra::forget(
+                    &cache,
+                    forget.as_deref(),
+                    dra_version.as_deref(),
+                    forget_index,
+                )?;
+                for c in &gone {
+                    ev.status(&format!(
+                        "  removed {} {} ({:.1} MB)",
+                        c.state,
+                        c.version,
+                        c.bytes as f64 / 1e6
+                    ));
+                }
+                if gone.is_empty() && !forget_index {
+                    ev.status("  nothing matched; the cache is unchanged");
+                }
+                if forget_index {
+                    ev.status("  removed the index; it will be fetched again when needed");
+                }
+            }
+            print!("{}", dra::render_cache(&cache, &dra::contents(&cache)));
             Ok(())
         }
         Command::Replay { settings, out, cache, dry_run } => {

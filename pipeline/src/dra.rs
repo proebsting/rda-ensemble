@@ -390,3 +390,137 @@ pub fn render(rows: &[Listing]) -> String {
     out
 }
 
+
+// ---------------------------------------------------------------------------
+// What is on disk.
+//
+// A user who has fetched ten states has a few hundred megabytes in a
+// directory they have never seen. These make it visible and removable
+// without anyone having to know the layout.
+// ---------------------------------------------------------------------------
+
+/// One package sitting in the cache.
+#[derive(serde::Serialize)]
+pub struct Cached {
+    pub state: String,
+    pub version: String,
+    /// Bytes on disk, the files as unpacked.
+    pub bytes: u64,
+    pub path: PathBuf,
+    /// Whether DRA's adjacency graph came with it.
+    pub has_graph: bool,
+}
+
+/// Every package in the cache, by state and then version.
+///
+/// A directory that does not parse as `XX_vNN`, or holds no GeoJSON, is not
+/// ours and is left alone: people put things in cache directories.
+pub fn contents(cache: &Path) -> Vec<Cached> {
+    let Ok(entries) = std::fs::read_dir(cache) else {
+        return Vec::new();
+    };
+    let mut out: Vec<Cached> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            let (state, version) = name.split_once('_')?;
+            let package = cached(cache, state, version)?;
+            Some(Cached {
+                state: state.to_string(),
+                version: version.to_string(),
+                bytes: directory_size(&e.path()),
+                path: e.path(),
+                has_graph: package.graph.is_some(),
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| a.state.cmp(&b.state).then(a.version.cmp(&b.version)));
+    out
+}
+
+/// Bytes under a directory. Shallow is enough: DRA packages are flat.
+fn directory_size(dir: &Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    entries
+        .filter_map(|e| e.ok())
+        .filter_map(|e| e.metadata().ok())
+        .map(|m| if m.is_dir() { 0 } else { m.len() })
+        .sum()
+}
+
+/// The cached index of what DRA publishes, if it has been fetched.
+pub fn index_file(cache: &Path) -> Option<(PathBuf, u64)> {
+    let path = cache.join("inventory.json");
+    let bytes = std::fs::metadata(&path).ok()?.len();
+    Some((path, bytes))
+}
+
+/// Delete cached packages, and say which went.
+///
+/// `state` and `version` narrow what is removed; both absent means all of
+/// them. The index is left alone unless `index` asks for it, since it is
+/// small and re-fetching it costs a round trip to GitHub.
+pub fn forget(
+    cache: &Path,
+    state: Option<&str>,
+    version: Option<&str>,
+    index: bool,
+) -> Result<Vec<Cached>> {
+    let doomed: Vec<Cached> = contents(cache)
+        .into_iter()
+        .filter(|c| state.map_or(true, |s| s.eq_ignore_ascii_case(&c.state)))
+        .filter(|c| version.map_or(true, |v| v == c.version))
+        .collect();
+    for c in &doomed {
+        std::fs::remove_dir_all(&c.path)
+            .with_context(|| format!("removing {}", c.path.display()))?;
+    }
+    if index {
+        let path = cache.join("inventory.json");
+        if path.exists() {
+            std::fs::remove_file(&path)
+                .with_context(|| format!("removing {}", path.display()))?;
+        }
+    }
+    Ok(doomed)
+}
+
+/// The cache as lines of text, for a terminal.
+pub fn render_cache(cache: &Path, rows: &[Cached]) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(out, "{}\n", cache.display());
+    if rows.is_empty() {
+        let _ = writeln!(out, "  empty");
+    } else {
+        let _ = writeln!(out, "  {:<7}{:<9}{:>9}   adjacency", "state", "version", "size");
+        for c in rows {
+            let _ = writeln!(
+                out,
+                "  {:<7}{:<9}{:>8.1}M   {}",
+                c.state,
+                c.version,
+                c.bytes as f64 / 1e6,
+                if c.has_graph { "DRA graph" } else { "shapes only" },
+            );
+        }
+        let total: u64 = rows.iter().map(|c| c.bytes).sum();
+        let _ = writeln!(
+            out,
+            "\n  {} package(s), {:.1} MB",
+            rows.len(),
+            total as f64 / 1e6
+        );
+    }
+    if let Some((_, bytes)) = index_file(cache) {
+        let _ = writeln!(out, "  index    {:.0} kB, re-fetched after a day", bytes as f64 / 1e3);
+    }
+    let _ = writeln!(
+        out,
+        "\n`rda-ensemble cache --forget XX` removes a state; --forget-all removes every package."
+    );
+    out
+}

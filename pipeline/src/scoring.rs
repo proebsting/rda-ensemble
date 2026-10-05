@@ -54,6 +54,9 @@ pub struct Summary {
     /// The first error scoring hit, if any. The chain cannot be stopped from
     /// inside a writer, so the rest of the run is skipped rather than scored.
     pub error: Option<String>,
+    /// Segments drawn, counting any inherited from a run this one extends.
+    /// The next extension starts its seeds past these.
+    pub segments: u64,
     /// Whether the run was asked to stop before it had taken every step.
     /// A reader should not have to infer this by comparing the steps asked
     /// for against the steps taken.
@@ -103,6 +106,11 @@ pub struct ChainState {
 }
 
 impl ChainState {
+    /// `resume_at` is the absolute step an extension carries on from. The
+    /// plan at that step is already in the output being appended to, so it
+    /// is neither scored again nor counted again, and the header is not
+    /// written a second time.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: &Context,
         scores: File,
@@ -110,15 +118,20 @@ impl ChainState {
         plans: Option<File>,
         events: crate::events::Sink,
         total: u64,
+        resume_at: Option<u64>,
     ) -> ChainState {
+        let writer = BufWriter::new(scores);
         ChainState {
             aggs: Aggregates::new(ctx),
-            csv: ScoresCsv::new(BufWriter::new(scores)),
+            csv: match resume_at {
+                Some(_) => ScoresCsv::appending(writer),
+                None => ScoresCsv::new(writer),
+            },
             by_district: BufWriter::new(by_district),
             plans: plans.map(BufWriter::new),
             previous: Vec::new(),
-            last_step: 0,
-            started: false,
+            last_step: resume_at.unwrap_or(0),
+            started: resume_at.is_some(),
             events,
             total,
             summary: Summary::default(),

@@ -97,6 +97,10 @@ pub fn write(
     // Said outright, because an ensemble that stopped early is not the
     // ensemble that was asked for and nothing else in the file says so.
     chain.insert("stopped_early".into(), json!(summary.stopped));
+    // Segments drawn, including any inherited from a run this one extended.
+    // An extension starts its seeds past these, so without it a second
+    // extension would replay the first one's random stream.
+    chain.insert("segments_taken".into(), json!(summary.segments));
     chain.insert("variant".into(), json!(cli.variant.as_str()));
     chain.insert("tolerance".into(), json!(cli.tolerance));
     chain.insert("seed_tolerance".into(), json!(cli.seed_tolerance));

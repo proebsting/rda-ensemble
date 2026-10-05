@@ -55,7 +55,39 @@ impl Cancel {
     }
 }
 
+/// Carrying on from a chain that already ran.
+///
+/// A ReCom chain is Markov, so continuing from the plan an earlier run
+/// ended on is the same chain, not a new one that happens to start
+/// somewhere plausible. What has to come across is the plan itself, the
+/// step it was at, and how many segments were already drawn -- without that
+/// last one the extension would re-use the earlier run's random stream.
+pub struct Extension {
+    /// The plan to carry on from, geoid to district, districts from 1.
+    pub plan: HashMap<String, u32>,
+    /// The absolute step that plan sat at.
+    pub from_step: u64,
+    /// Segments the earlier run consumed, so new seeds cannot replay old
+    /// ones.
+    pub segment_base: u64,
+}
+
 pub fn run(cli: &RunArgs, keep: &[Artifact], cancel: &Cancel, ev: &Sink) -> Result<()> {
+    run_extended(cli, keep, cancel, ev, None)
+}
+
+/// A run, optionally continuing an earlier one.
+///
+/// With `extend`, `cli.steps` is how many *more* steps to take, the output
+/// directory is expected to already hold the earlier run's files, and
+/// everything written is appended to them.
+pub fn run_extended(
+    cli: &RunArgs,
+    keep: &[Artifact],
+    cancel: &Cancel,
+    ev: &Sink,
+    extend: Option<&Extension>,
+) -> Result<()> {
     let districts = districts(cli, ev)?;
     let steps = steps(cli)?;
     check(cli, districts, steps)?;
@@ -79,14 +111,14 @@ pub fn run(cli: &RunArgs, keep: &[Artifact], cancel: &Cancel, ev: &Sink) -> Resu
             let ctx = ctx.clone();
             let artifacts = &artifacts;
             handles.push(scope.spawn(move || {
-                one_chain(cli, districts, steps, artifacts, ctx, i, cancel, ev)
+                one_chain(cli, districts, steps, artifacts, ctx, i, cancel, ev, extend)
             }));
         }
         handles.into_iter().map(|h| h.join().expect("a chain panicked")).collect()
     })?;
 
     report_convergence(
-        cli, districts, steps, &package, &ctx, &artifacts, &summaries, started, ev,
+        cli, districts, steps, &package, &ctx, &artifacts, &summaries, started, ev, extend,
     )
 }
 
@@ -119,6 +151,7 @@ fn one_chain(
     index: usize,
     cancel: &Cancel,
     ev: &Sink,
+    extend: Option<&Extension>,
 ) -> Result<Summary> {
     let dir = chain_dir(cli, index);
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
@@ -126,8 +159,20 @@ fn one_chain(
     // same for every chain and were written once. These are not.
     let mine = artifacts.relocated(&dir);
 
-    let (order, seed_assignments) =
-        seed_plan(cli, ev, districts, &ctx, &mine, chain_seed(cli, index), index)?;
+    let (order, seed_assignments) = match extend {
+        // An extension already has its starting plan; drawing a fresh one
+        // would start a different chain wearing the same settings.
+        Some(e) => {
+            let order = ctx.sorted_precinct_order();
+            let assignments = carry_over(e, &order, &ctx)?;
+            ev.status(&format!(
+                "carrying on from step {} of the earlier run",
+                e.from_step
+            ));
+            (order, assignments)
+        }
+        None => seed_plan(cli, ev, districts, &ctx, &mine, chain_seed(cli, index), index)?,
+    };
     chain(
         cli,
         ev,
@@ -139,6 +184,7 @@ fn one_chain(
         index,
         &dir,
         cancel,
+        extend,
     )
 }
 
@@ -792,6 +838,7 @@ fn chain(
     index: usize,
     dir: &std::path::Path,
     cancel: &Cancel,
+    extend: Option<&Extension>,
 ) -> Result<Summary> {
     // rustrecom builds its own graph, so it owns its own invariants. The
     // document below is the only interchange structure in the run, and it is
@@ -843,23 +890,36 @@ fn chain(
         edge_weight_keys: Vec::new(),
     };
 
-    let scores = File::create(dir.join("scores.csv"))
-        .with_context(|| format!("creating {}", dir.join("scores.csv").display()))?;
-    let by_district = File::create(dir.join("by_district.jsonl"))?;
+    // An extension continues the files it was handed; a fresh run starts
+    // them. Opening for append on a fresh run would silently double an
+    // ensemble if --out happened to hold one already.
+    let open = |path: std::path::PathBuf| -> Result<File> {
+        let f = match extend {
+            Some(_) => std::fs::OpenOptions::new().append(true).open(&path),
+            None => File::create(&path),
+        };
+        f.with_context(|| format!("opening {}", path.display()))
+    };
+    let scores = open(dir.join("scores.csv"))?;
+    let by_district = open(dir.join("by_district.jsonl"))?;
     let plans = if artifacts.wants(Artifact::Plans) {
-        Some(File::create(artifacts.path(Artifact::Plans))?)
+        Some(open(artifacts.path(Artifact::Plans))?)
     } else {
         None
     };
     // Outlives the segments: rustrecom takes the writer and closes it at the
     // end of each call, but the files and the step cursor carry on.
+    // Absolute step numbering continues across an extension, so the
+    // combined scores.csv reads as one chain rather than two restarts.
+    let step_base = extend.map_or(0, |e| e.from_step);
     let state = Arc::new(Mutex::new(ChainState::new(
         &ctx,
         scores,
         by_district,
         plans,
         ev.clone(),
-        steps,
+        step_base + steps,
+        extend.map(|e| e.from_step),
     )));
 
     let opts = ScoreOptions {
@@ -888,14 +948,17 @@ fn chain(
     let mut stopped = false;
     for (segment, &(offset, num_steps)) in plan.iter().enumerate() {
         params.num_steps = num_steps;
-        params.rng_seed = crate::seed::derive(cli.rng_seed, index as u64, segment as u64);
+        // Past the earlier run's segments, so an extension cannot draw a
+        // stream that run already drew.
+        let segment_number = extend.map_or(0, |e| e.segment_base) + segment as u64;
+        params.rng_seed = crate::seed::derive(cli.rng_seed, index as u64, segment_number);
         let writer = ScoringWriter::new(
             ctx.clone(),
             order.clone(),
             opts.clone(),
             cli.prefixes,
             cli.sample_every,
-            offset,
+            step_base + offset,
             state.clone(),
         );
         rustrecom::recom::run::multi_chain(
@@ -937,6 +1000,7 @@ fn chain(
         .expect("chain state")
         .summary;
     summary.stopped = stopped;
+    summary.segments = extend.map_or(0, |e| e.segment_base) + plan.len() as u64;
     if stopped {
         ev.status(&format!(
             "  stopped early: {} steps taken, {} plans scored",
@@ -946,6 +1010,62 @@ fn chain(
         ev.status(&format!("chain {}: scored {} plans", index + 1, summary.scored));
     }
     Ok(summary)
+}
+
+/// Every numeric column of a scores.csv, in file order.
+///
+/// Only an extension needs this: a fresh run already has the numbers in
+/// memory. Reading them back is what lets the diagnostics describe the
+/// combined ensemble rather than the part added today.
+fn series_from_csv(path: &std::path::Path) -> Result<std::collections::BTreeMap<String, Vec<f64>>> {
+    use std::io::BufRead;
+    let file = File::open(path)
+        .with_context(|| format!("reading {} for the diagnostics", path.display()))?;
+    let mut lines = std::io::BufReader::new(file).lines();
+    let header = lines
+        .next()
+        .transpose()?
+        .ok_or_else(|| anyhow!("{} is empty", path.display()))?;
+    let names: Vec<String> = header.trim().split(',').map(str::to_string).collect();
+    let mut out: std::collections::BTreeMap<String, Vec<f64>> = Default::default();
+    for line in lines {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        for (name, field) in names.iter().zip(line.trim().split(',')) {
+            // The first column is the plan's name, and a blank is a score
+            // that does not apply to this plan; neither is a number.
+            if let Ok(v) = field.parse::<f64>() {
+                out.entry(name.clone()).or_default().push(v);
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// The earlier run's final plan, in this run's node order.
+///
+/// The plan arrives as geoids because that is what survives between runs;
+/// node numbering is an artefact of one process. Districts come back to
+/// ReCom's zero-based numbering here.
+fn carry_over(e: &Extension, order: &[u32], ctx: &Context) -> Result<Vec<u32>> {
+    let mut out = Vec::with_capacity(order.len());
+    for (node, &precinct) in order.iter().enumerate() {
+        let geoid = &ctx.geoids[precinct as usize];
+        let district = e.plan.get(geoid).ok_or_else(|| {
+            anyhow!(
+                "the earlier plan does not cover precinct {geoid}. The two runs \
+                 are not on the same data: check the state and --dra-version."
+            )
+        })?;
+        if *district == 0 {
+            bail!("precinct {geoid} is unassigned in the earlier plan");
+        }
+        out.push(district - 1);
+        debug_assert!(node < order.len());
+    }
+    Ok(out)
 }
 
 /// How the chain's steps divide into segments.
@@ -992,10 +1112,23 @@ fn report_convergence(
     summaries: &[Summary],
     started: Instant,
     ev: &Sink,
+    extend: Option<&Extension>,
 ) -> Result<()> {
-    let series: Vec<_> = summaries.iter().map(|s| s.series.clone()).collect();
+    // An extension's diagnostics are about the whole ensemble, not the part
+    // added today. By now the new rows have been appended, so the file on
+    // disk is the whole thing and is the honest source -- the chains hold
+    // only what they themselves scored.
+    let series: Vec<_> = match extend {
+        Some(_) => vec![series_from_csv(&cli.out.join("scores.csv"))?],
+        None => summaries.iter().map(|s| s.series.clone()).collect(),
+    };
     let report = crate::diagnostics::Report::build(&series);
-    let scored: u64 = summaries.iter().map(|s| s.scored).sum();
+    // `series` already holds the earlier plans as well as the new ones, so
+    // its length is the size of the ensemble that now exists on disk.
+    let scored: u64 = series
+        .iter()
+        .map(|c| c.values().next().map_or(0, |v| v.len() as u64))
+        .sum();
     let taken = summaries.iter().map(|s| s.steps).max().unwrap_or(0);
 
     ev.status(&format!(
@@ -1008,6 +1141,7 @@ fn report_convergence(
     let combined = Summary {
         steps: taken,
         scored,
+        segments: summaries.iter().map(|s| s.segments).max().unwrap_or(0),
         error: None,
         // Any chain stopping early makes the whole ensemble short of what
         // was asked for, so the manifest says so for the run as a whole.
