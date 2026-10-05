@@ -14,13 +14,31 @@
 //! `(seed, chain, segment)` and an extension that restarted that count
 //! would replay the earlier run's random stream.
 //!
-//! # The caveat
+//! # Exactly the ensemble a longer run would have produced
 //!
-//! The chain resumes from the last plan that was *written*, which at
-//! `--sample-every 200` is up to 199 steps behind where the earlier run
-//! actually stopped. Those steps happened and were counted, but the plans
-//! were not kept, so they cannot be carried on from. The extension says
-//! which step it is resuming from rather than leaving that to be inferred.
+//! A segmented run puts its boundaries at exact multiples of the segment
+//! length, and each segment's seed is derived from its index. So a 300-step
+//! run and a 500-step run share segments 0, 1 and 2 *identically*: segment 2
+//! starts at step 200 from the same plan with the same seed in both, and the
+//! longer run merely runs it further. The two only diverge where the shorter
+//! one stopped in the middle of a segment.
+//!
+//! So an extension that resumes at a **boundary** -- rather than wherever
+//! the earlier run happened to stop -- continues the same random stream, and
+//! the combined ensemble is byte-identical to one long run. That means
+//! backing up: the steps between the last boundary and where the run stopped
+//! are regenerated. Nothing is lost by this, because they regenerate
+//! identically; it is a prefix of the same stream.
+//!
+//! Two conditions. The earlier run has to have been segmented, since an
+//! unsegmented chain is one continuous stream with no boundary to rejoin.
+//! And the segment length has to be a multiple of the sampling interval, or
+//! the plan at a boundary was never written down.
+//!
+//! When either fails, the extension still continues the chain -- ReCom is
+//! Markov, so resuming from the last saved plan is a valid continuation --
+//! but it draws a fresh stream and will not match a single longer run. It
+//! says which of the two it did.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -39,6 +57,15 @@ struct Earlier {
     plan: HashMap<String, u32>,
     from_step: u64,
     segment_base: u64,
+    /// Whether resuming here reproduces what one longer run would have
+    /// drawn. True when `from_step` is a segment boundary.
+    exact: bool,
+    /// Why not, when it is not.
+    why_not: Option<String>,
+    /// Steps the earlier ensemble covers, counting from zero. What "200
+    /// more" is measured against -- not the resume point, which may be
+    /// behind it.
+    base_steps: u64,
 }
 
 pub fn extend(
@@ -59,23 +86,68 @@ pub fn extend(
             .ok_or_else(|| anyhow!("--plans {p} overflows at this sampling rate"))?,
         (None, None) => bail!("give --plans or --steps: how much longer to run"),
     };
+    // What the ensemble should cover when this is done. Measured from what
+    // it already covers, not from the resume point: backing up to a boundary
+    // is an implementation detail and must not change what "200 more" means.
+    let target = earlier.base_steps + more;
+    let this_run = target
+        .checked_sub(earlier.from_step)
+        .filter(|n| *n > 0)
+        .ok_or_else(|| anyhow!("that is not longer than the ensemble already is"))?;
+
+    // Changing the segment length moves every boundary, so the seeds stop
+    // lining up with what a single longer run would have drawn. Decide this
+    // before claiming anything about the result.
+    let changed_segments = segment_steps.is_some_and(|n| earlier.settings.segment_steps != Some(n));
+    let exact = earlier.exact && !changed_segments;
 
     ev.status(&format!(
-        "extending {} by {more} steps, sampling every {}",
+        "extending {} by {more} steps, to {target}, sampling every {}",
         from.display(),
         earlier.settings.sample_every
     ));
+    if exact {
+        ev.status(&format!(
+            "  resuming at step {}, a segment boundary: the result is what one \
+             run of {target} steps would have produced",
+            earlier.from_step,
+        ));
+    } else if changed_segments {
+        ev.warn(&format!(
+            "--segment-steps {} differs from the {} this ensemble was built with, \
+             which moves every boundary. Resuming from step {} on a fresh random \
+             stream: a valid continuation of the same chain, but not identical to \
+             one longer run, and later extensions will not line up with it.",
+            segment_steps.expect("changed"),
+            earlier
+                .settings
+                .segment_steps
+                .map_or("none".to_string(), |v| v.to_string()),
+            earlier.from_step
+        ));
+    } else if let Some(why) = &earlier.why_not {
+        ev.warn(&format!(
+            "{why} Resuming from step {} on a fresh random stream: a valid \
+             continuation of the same chain, but not identical to one longer run.",
+            earlier.from_step
+        ));
+    }
 
-    copy_results(from, out)?;
+    // Anything the earlier run wrote past the resume point is regenerated,
+    // identically, by the segment this one starts with.
+    copy_results(from, out, earlier.from_step)?;
 
     let mut args = earlier
         .settings
         .clone()
         .into_args(out.to_path_buf(), cache)?;
     // What to run now, as opposed to what the earlier run ran.
-    args.steps = Some(more);
+    args.steps = Some(this_run);
     args.plans = None;
-    args.segment_steps = segment_steps;
+    // Keeping the earlier run's segmentation is what keeps the boundaries
+    // where the next extension will expect them. Overriding it is allowed,
+    // and breaks that.
+    args.segment_steps = segment_steps.or(earlier.settings.segment_steps);
     // The plans have to keep being written, or this ensemble cannot be
     // extended again.
     if !args.keep.contains(&KeepArg::Plans) && !args.keep.contains(&KeepArg::All) {
@@ -119,16 +191,49 @@ fn read_earlier(dir: &Path) -> Result<Earlier> {
             dir.display()
         );
     }
-    let (name, plan) = last_plan(&plans)?;
-    let from_step: u64 = name
-        .parse()
-        .with_context(|| format!("the last plan is named {name:?}, which is not a step number"))?;
+    // Where to rejoin the stream. A boundary if there is one to be had,
+    // and the last saved plan otherwise.
+    let why_not = match (settings.segment_steps, settings.sample_every) {
+        (None, _) => Some(
+            "That ensemble was not segmented, so it has no boundary to rejoin."
+                .to_string(),
+        ),
+        (Some(length), every) if every != 0 && length % every != 0 => Some(format!(
+            "Its segment length {length} is not a multiple of its sampling \
+             interval {every}, so no plan was written at a boundary."
+        )),
+        _ => None,
+    };
+    let boundary = why_not.as_ref().map_or(settings.segment_steps, |_| None);
+    let (step, plan) = resume_point(&plans, boundary)?;
+
+    // Steps the earlier run covers. The manifest records the last step it
+    // reached; one more than that is its length.
+    let base_steps = std::fs::read_to_string(dir.join("manifest.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .and_then(|m| m.get("chain")?.get("steps_taken")?.as_u64())
+        .map(|last| last + 1)
+        .or(settings.steps)
+        .ok_or_else(|| anyhow!(
+            "{} does not record how many steps that run took, so there is \
+             nothing to measure an extension against",
+            dir.display()
+        ))?;
 
     Ok(Earlier {
+        base_steps,
+        segment_base: match boundary {
+            // The segment starting at B is the one a longer run numbers B/L,
+            // which is what makes the seeds line up.
+            Some(length) => step / length,
+            None => segments_taken(dir),
+        },
         settings,
         plan,
-        from_step,
-        segment_base: segments_taken(dir),
+        from_step: step,
+        exact: boundary.is_some(),
+        why_not,
     })
 }
 
@@ -159,30 +264,40 @@ fn segments_taken(dir: &Path) -> u64 {
         .unwrap_or(1)
 }
 
-/// The last record of a plans file: its name, and geoid to district.
-fn last_plan(path: &Path) -> Result<(String, HashMap<String, u32>)> {
+/// The step to carry on from, and the plan that was there.
+///
+/// With a segment length, the last saved plan that sits on a boundary;
+/// without one, simply the last saved plan.
+fn resume_point(path: &Path, segment: Option<u64>) -> Result<(u64, HashMap<String, u32>)> {
     use std::io::BufRead;
     let file = std::fs::File::open(path)
         .with_context(|| format!("reading {}", path.display()))?;
-    let mut last = None;
+    let mut best: Option<(u64, String)> = None;
     for line in std::io::BufReader::new(file).lines() {
         let line = line?;
-        if !line.trim().is_empty() {
-            last = Some(line);
+        if line.trim().is_empty() {
+            continue;
         }
+        let Some(step) = step_of(&line) else { continue };
+        if segment.is_some_and(|length| length == 0 || step % length != 0) {
+            continue;
+        }
+        best = Some((step, line));
     }
-    let line = last.ok_or_else(|| anyhow!("{} holds no plans", path.display()))?;
+    let (step, line) = best.ok_or_else(|| match segment {
+        Some(length) => anyhow!(
+            "{} holds no plan on a segment boundary (a multiple of {length}), \
+             so there is nowhere to rejoin the chain's random stream",
+            path.display()
+        ),
+        None => anyhow!("{} holds no plans", path.display()),
+    })?;
     let doc: Value = serde_json::from_str(&line)
-        .with_context(|| format!("the last record of {} is not JSON", path.display()))?;
-    let name = doc
-        .get("name")
-        .and_then(|n| n.as_str())
-        .ok_or_else(|| anyhow!("the last plan has no name"))?
-        .to_string();
+        .with_context(|| format!("a record of {} is not JSON", path.display()))?;
     let plan = doc
         .get("plan")
         .and_then(|p| p.as_object())
-        .ok_or_else(|| anyhow!("the last record is not a plan"))?;
+        .ok_or_else(|| anyhow!("that record is not a plan"))?;
     let mut out = HashMap::with_capacity(plan.len());
     for (geoid, district) in plan {
         let d = district
@@ -190,12 +305,23 @@ fn last_plan(path: &Path) -> Result<(String, HashMap<String, u32>)> {
             .ok_or_else(|| anyhow!("district for {geoid} is not a number"))?;
         out.insert(geoid.clone(), d as u32);
     }
-    Ok((name, out))
+    Ok((step, out))
 }
 
-/// Copy the earlier results into the new directory, so what is appended to
-/// is a copy and the original is left exactly as it was.
-fn copy_results(from: &Path, out: &Path) -> Result<()> {
+/// The step number a tagged record carries, if it has one.
+fn step_of(line: &str) -> Option<u64> {
+    let doc: Value = serde_json::from_str(line).ok()?;
+    doc.get("name")?.as_str()?.parse().ok()
+}
+
+/// Copy the earlier results into the new directory, keeping rows up to and
+/// including `through` and dropping anything after it.
+///
+/// What is dropped is regenerated by the segment this run starts with, from
+/// the same plan with the same seed, so it comes back identical. The copy
+/// leaves the original directory exactly as it was.
+fn copy_results(from: &Path, out: &Path, through: u64) -> Result<()> {
+    use std::io::{BufRead, Write};
     if from == out {
         bail!(
             "--from and --out are the same directory. The extension is \
@@ -205,12 +331,45 @@ fn copy_results(from: &Path, out: &Path) -> Result<()> {
     }
     std::fs::create_dir_all(out)
         .with_context(|| format!("creating {}", out.display()))?;
+
     for name in ["scores.csv", "by_district.jsonl", "plans.jsonl"] {
         let src = from.join(name);
-        if src.exists() {
-            std::fs::copy(&src, out.join(name))
-                .with_context(|| format!("copying {} to {}", src.display(), out.display()))?;
+        if !src.exists() {
+            continue;
         }
+        let reader = std::io::BufReader::new(
+            std::fs::File::open(&src)
+                .with_context(|| format!("reading {}", src.display()))?,
+        );
+        let dest = out.join(name);
+        let mut writer = std::io::BufWriter::new(
+            std::fs::File::create(&dest)
+                .with_context(|| format!("creating {}", dest.display()))?,
+        );
+        let csv = name.ends_with(".csv");
+        for (n, line) in reader.lines().enumerate() {
+            let line = line?;
+            // The CSV header has no step of its own and always goes through.
+            let keep = if csv && n == 0 {
+                true
+            } else if csv {
+                line.split(',')
+                    .next()
+                    .and_then(|f| f.trim().parse::<u64>().ok())
+                    .is_some_and(|step| step <= through)
+            } else if line.trim().is_empty() {
+                false
+            } else {
+                step_of(&line).is_some_and(|step| step <= through)
+            };
+            if keep {
+                writer.write_all(line.as_bytes())?;
+                // scores.csv is written with CRLF by the csv crate, and
+                // appending to a file with mixed endings makes a mess.
+                writer.write_all(if csv { b"\r\n" } else { b"\n" })?;
+            }
+        }
+        writer.flush()?;
     }
     Ok(())
 }
@@ -226,22 +385,49 @@ mod tests {
         dir
     }
 
-    /// The chain resumes from the *last* plan, which is what decides where
-    /// the extension picks up.
-    #[test]
-    fn the_last_plan_is_the_one_carried_over() {
-        let dir = scratch("last");
+    fn plans_file(dir: &Path, steps: &[u64]) -> PathBuf {
         let path = dir.join("plans.jsonl");
-        std::fs::write(
-            &path,
-            "{\"_tag_\":\"plan\",\"name\":\"000000\",\"plan\":{\"a\":1,\"b\":1}}\n\
-             {\"_tag_\":\"plan\",\"name\":\"000290\",\"plan\":{\"a\":2,\"b\":1}}\n\n",
-        )
-        .unwrap();
-        let (name, plan) = last_plan(&path).expect("reads");
-        assert_eq!(name, "000290");
-        assert_eq!(plan.get("a"), Some(&2));
+        let body: String = steps
+            .iter()
+            .map(|s| {
+                format!("{{\"_tag_\":\"plan\",\"name\":\"{s:06}\",\"plan\":{{\"a\":1,\"b\":2}}}}\n")
+            })
+            .collect();
+        std::fs::write(&path, body).unwrap();
+        path
+    }
+
+    /// Unsegmented, there is no boundary, so the last saved plan is it.
+    #[test]
+    fn without_segments_the_last_plan_is_the_one_carried_over() {
+        let dir = scratch("last");
+        let path = plans_file(&dir, &[0, 100, 200, 290]);
+        let (step, plan) = resume_point(&path, None).expect("reads");
+        assert_eq!(step, 290);
         assert_eq!(plan.len(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Segmented, the extension backs up to the last boundary so that the
+    /// random stream it rejoins is the one a longer run would have drawn.
+    #[test]
+    fn with_segments_it_backs_up_to_a_boundary() {
+        let dir = scratch("boundary");
+        let path = plans_file(&dir, &[0, 100, 200, 290]);
+        assert_eq!(resume_point(&path, Some(100)).expect("reads").0, 200);
+        // Already on a boundary: nothing to back up over.
+        let path = plans_file(&dir, &[0, 100, 200]);
+        assert_eq!(resume_point(&path, Some(100)).expect("reads").0, 200);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A run too short to have reached a boundary other than its start
+    /// rejoins at step 0, which is still correct, just unhelpful.
+    #[test]
+    fn a_run_shorter_than_one_segment_rejoins_at_the_start() {
+        let dir = scratch("short");
+        let path = plans_file(&dir, &[0, 10, 20]);
+        assert_eq!(resume_point(&path, Some(100)).expect("reads").0, 0);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -250,8 +436,35 @@ mod tests {
         let dir = scratch("empty");
         let path = dir.join("plans.jsonl");
         std::fs::write(&path, "\n\n").unwrap();
-        assert!(last_plan(&path).is_err());
+        assert!(resume_point(&path, None).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Dropping what comes after the resume point is what makes the
+    /// regenerated steps land where the originals were.
+    #[test]
+    fn the_copy_stops_at_the_resume_point() {
+        let src = scratch("copysrc");
+        let dst = scratch("copydst");
+        std::fs::write(
+            src.join("scores.csv"),
+            "name,a\r\n000000,1\r\n000100,2\r\n000200,3\r\n000290,4\r\n",
+        )
+        .unwrap();
+        plans_file(&src, &[0, 100, 200, 290]);
+        copy_results(&src, &dst, 200).expect("copies");
+
+        let csv = std::fs::read_to_string(dst.join("scores.csv")).unwrap();
+        assert!(csv.starts_with("name,a"), "the header survives: {csv:?}");
+        assert!(csv.contains("000200"), "the boundary row stays");
+        assert!(!csv.contains("000290"), "later rows go: {csv:?}");
+        assert!(csv.ends_with("\r\n"), "CRLF, so appending does not mix endings");
+
+        let plans = std::fs::read_to_string(dst.join("plans.jsonl")).unwrap();
+        assert_eq!(plans.lines().count(), 3);
+        assert!(!plans.contains("000290"));
+        let _ = std::fs::remove_dir_all(&src);
+        let _ = std::fs::remove_dir_all(&dst);
     }
 
     /// Extending in place would append to the file being read and leave
@@ -259,7 +472,7 @@ mod tests {
     #[test]
     fn extending_into_the_source_is_refused() {
         let dir = scratch("same");
-        let e = copy_results(&dir, &dir).unwrap_err().to_string();
+        let e = copy_results(&dir, &dir, 0).unwrap_err().to_string();
         assert!(e.contains("same directory"), "{e}");
         let _ = std::fs::remove_dir_all(&dir);
     }

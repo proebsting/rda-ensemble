@@ -500,22 +500,38 @@ original directory is left exactly as it was.
 The earlier run must have been made with `--keep plans`; the plan to resume
 from is otherwise not written down, and `extend` says so rather than guessing.
 
-Three things to know.
+### It gives you exactly the longer run
 
-**It resumes from the last plan written, not the last step taken.** At
-`--sample-every 200` those differ by up to 199 steps. The run says which step
-it is picking up from.
+Run 500 steps, or run 300 and extend by 200: the same `scores.csv`,
+`plans.jsonl`, `by_district.jsonl`, `diagnostics.json` and `settings.json`,
+byte for byte. Chained extensions too — 300 then 500 then 800 equals one run
+of 800.
 
-**It is not byte-identical to one longer run.** Each extension draws seeds
-past the segments the earlier run used, so the random stream from the resume
-point differs from what a single longer run would have drawn. The chain is
-equally valid either way — the Markov property is what guarantees that — but
-do not expect the two to match. Extending the *same* ensemble twice does
-match.
+That works because a segmented run puts its boundaries at exact multiples of
+the segment length and derives each segment's seed from its index. A 300-step
+run and a 500-step run therefore *share* segments 0, 1 and 2: segment 2 starts
+at step 200 from the same plan with the same seed in both, and the longer run
+merely runs it further. The two only part company where the shorter one
+stopped mid-segment.
 
-**Extensions chain.** `segments_taken` in the manifest is what lets a second
-extension avoid replaying the first one's stream, so extend an extension
-freely.
+So `extend` rejoins at a boundary rather than wherever the run happened to
+stop, which means backing up — the steps between the last boundary and the
+end are regenerated. Nothing is lost: they regenerate identically, being a
+prefix of the same stream. `--steps 200` still means two hundred steps more
+than the ensemble has, not two hundred past the resume point.
+
+Two conditions, both reported when they fail:
+
+- **The earlier run must have been segmented.** An unsegmented chain is one
+  continuous stream with no boundary to rejoin.
+- **`--segment-steps` must be a multiple of `--sample-every`,** or no plan
+  was written at a boundary.
+
+When either fails, the extension still continues the chain — resuming from
+the last saved plan is a valid continuation, since ReCom is Markov — but it
+draws a fresh stream and will not match one longer run. Passing a different
+`--segment-steps` to `extend` has the same effect, because it moves every
+boundary.
 
 Single-chain runs only, for now. With `--chains` it is no longer one question
 which chain an R-hat was computed over, so `extend` refuses rather than

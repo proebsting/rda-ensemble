@@ -1033,9 +1033,12 @@ fn series_from_csv(path: &std::path::Path) -> Result<std::collections::BTreeMap<
         if line.trim().is_empty() {
             continue;
         }
-        for (name, field) in names.iter().zip(line.trim().split(',')) {
-            // The first column is the plan's name, and a blank is a score
-            // that does not apply to this plan; neither is a number.
+        // Skip the first column. It holds the plan's name, which is a
+        // zero-padded step number and so parses perfectly well as a float --
+        // diagnosing it reported the step counter as the worst-mixing score
+        // in the ensemble. A blank elsewhere is a score that does not apply
+        // to that plan, and is skipped by failing to parse.
+        for (name, field) in names.iter().zip(line.trim().split(',')).skip(1) {
             if let Ok(v) = field.parse::<f64>() {
                 out.entry(name.clone()).or_default().push(v);
             }
@@ -1118,6 +1121,12 @@ fn report_convergence(
     // added today. By now the new rows have been appended, so the file on
     // disk is the whole thing and is the honest source -- the chains hold
     // only what they themselves scored.
+    // An extension was asked for however many steps it had left to run,
+    // but the files describe the whole ensemble, and so must the record of
+    // it: a settings.json saying 300 beside an 800-step ensemble would
+    // replay as something else entirely.
+    let steps = extend.map_or(steps, |e| e.from_step + steps);
+
     let series: Vec<_> = match extend {
         Some(_) => vec![series_from_csv(&cli.out.join("scores.csv"))?],
         None => summaries.iter().map(|s| s.series.clone()).collect(),
@@ -1163,7 +1172,9 @@ fn report_convergence(
     // back in: no outcomes, no local paths, ready to hand to someone else.
     // Written every time, because the person who will want it is usually not
     // the person who ran this, and nobody remembers to ask for it.
-    let settings = crate::settings::Settings::from_args(cli);
+    let mut settings = crate::settings::Settings::from_args(cli);
+    settings.steps = Some(steps);
+    settings.plans = None;
     std::fs::write(cli.out.join("settings.json"), settings.to_json())
         .with_context(|| format!("writing {}", cli.out.join("settings.json").display()))?;
 
@@ -1256,5 +1267,31 @@ mod segment_tests {
     #[test]
     fn zero_is_treated_as_unsegmented() {
         assert_eq!(segments(100, Some(0)), segments(100, None));
+    }
+}
+
+#[cfg(test)]
+mod csv_series_tests {
+    use super::series_from_csv;
+
+    /// The name column is a zero-padded step number, which parses as a
+    /// float. Diagnosing it reported the step counter as the ensemble's
+    /// worst-mixing score, which is both meaningless and alarming.
+    #[test]
+    fn the_plan_name_is_not_a_score() {
+        let dir = std::env::temp_dir().join(format!("rda-csv-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("scores.csv");
+        std::fs::write(
+            &path,
+            "name,reock,declination\r\n000000,0.4,0.1\r\n000010,0.5,\r\n000020,0.6,0.3\r\n",
+        )
+        .unwrap();
+        let series = series_from_csv(&path).expect("reads");
+        assert!(!series.contains_key("name"), "got {:?}", series.keys());
+        assert_eq!(series["reock"], vec![0.4, 0.5, 0.6]);
+        // A blank is a score that does not apply, not a zero.
+        assert_eq!(series["declination"], vec![0.1, 0.3]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
