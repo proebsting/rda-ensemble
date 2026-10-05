@@ -453,6 +453,38 @@ file matches the CLI's byte for byte.
 can re-score an ensemble with different options without running the chain
 again.
 
+## Settings as a file
+
+Every run writes `settings.json` beside its results, so usually there is
+nothing to do. When all you have is someone's `manifest.json`:
+
+```sh
+rda-ensemble settings --from their-results/ > settings.json
+```
+
+`--from` takes a manifest, a settings file, or a directory holding either.
+The JSON goes to standard output so it pipes; the portability warnings go to
+stderr so they do not land in the file. `--out FILE` writes instead.
+
+`replay` already reads a manifest directly, so this is not needed to repeat a
+run. It is for having the settings *as a file* — to keep, to edit, to send, or
+to diff against another run's.
+
+One difference worth knowing. A manifest records what a run **resolved**; a
+settings file records what it was **asked**. Converting one to the other
+therefore pins things the original left open:
+
+```
+  "adjacency": "auto",        ->  "adjacency": "dra",
+  "census": null,             ->  "census": "T_20_CENS",
+  "vap": null,                ->  "vap": "V_20_VAP",
+  "cvap": null,               ->  "cvap": "V_20_CVAP",
+```
+
+Both reproduce the same ensemble today. The converted one also reproduces it
+if a future DRA package would have resolved `--cycle 2020` differently, which
+is the stricter and usually better position to be in.
+
 ## Making an ensemble longer
 
 ```sh

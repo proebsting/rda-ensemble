@@ -159,6 +159,19 @@ pub enum Command {
         #[arg(long, value_name = "DIR")]
         cache: Option<PathBuf>,
     },
+    /// Write the settings a run used, from its manifest or its directory.
+    ///
+    /// `replay` reads a manifest directly, so this is not needed to repeat a
+    /// run. It is for having the settings as a file: to keep, to edit, to
+    /// send, or to diff against another run's.
+    Settings {
+        /// A manifest.json, a settings.json, or a directory holding either.
+        #[arg(long, value_name = "PATH")]
+        from: PathBuf,
+        /// Where to write it. Standard output if left out, so it pipes.
+        #[arg(long, value_name = "FILE")]
+        out: Option<PathBuf>,
+    },
     /// Run an existing ensemble's chain for longer.
     ///
     /// Reads the settings and the last plan of an earlier run, copies its
@@ -541,6 +554,35 @@ pub fn real_main(cli: Cli, ev: &Sink) -> Result<()> {
             ev.status(&format!("  {}", pkg.geojson.display()));
             if let Some(g) = &pkg.graph {
                 ev.status(&format!("  {}", g.display()));
+            }
+            Ok(())
+        }
+        Command::Settings { from, out } => {
+            // A directory is what people have: the results, not the one file
+            // inside them they would have to know the name of.
+            let path = if from.is_dir() {
+                ["settings.json", "manifest.json"]
+                    .iter()
+                    .map(|n| from.join(n))
+                    .find(|p| p.exists())
+                    .ok_or_else(|| anyhow::anyhow!(
+                        "{} holds neither settings.json nor manifest.json",
+                        from.display()
+                    ))?
+            } else {
+                from
+            };
+            let loaded = settings::Settings::read(&path)?;
+            // To stderr, so they are visible when the JSON is being piped.
+            for line in loaded.portability_warnings() {
+                ev.warn(&line);
+            }
+            match out {
+                Some(dest) => {
+                    std::fs::write(&dest, loaded.to_json())?;
+                    ev.status(&format!("wrote {}", dest.display()));
+                }
+                None => print!("{}", loaded.to_json()),
             }
             Ok(())
         }
