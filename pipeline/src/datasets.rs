@@ -53,8 +53,25 @@ pub fn classify(name: &str, entry: &Value) -> Option<Kind> {
     }
 }
 
-/// Print every dataset in a GeoJSON, grouped by the option it belongs to.
-pub fn list(path: &Path) -> Result<()> {
+/// One dataset a GeoJSON carries.
+///
+/// What a caller needs to offer it as a choice: the name to pass back, what
+/// the name is for, and -- for a composite election -- what it averages.
+pub struct Dataset {
+    pub kind: Kind,
+    pub name: String,
+    pub title: String,
+    /// The elections a composite averages, empty for everything else. Which
+    /// ones is the thing that decides whether a composite is the right pick.
+    pub members: Vec<String>,
+}
+
+/// Every dataset in a GeoJSON, grouped by the option it belongs to and
+/// newest first within a group.
+///
+/// Returns them rather than printing: this is what fills a list of choices,
+/// whether that is [`render`] writing lines or a caller building a menu.
+pub fn read(path: &Path) -> Result<Vec<Dataset>> {
     let text = std::fs::read_to_string(path)
         .with_context(|| format!("reading {}", path.display()))?;
     let doc: Value = serde_json::from_str(&text)
@@ -76,37 +93,62 @@ pub fn list(path: &Path) -> Result<()> {
             .then(a.1.cmp(b.1))
     });
 
-    println!("{}\n", path.display());
-    let width = rows.iter().map(|(_, n, _)| n.len()).max().unwrap_or(12).max(12);
+    Ok(rows
+        .into_iter()
+        .map(|(kind, name, entry)| Dataset {
+            kind,
+            name: name.to_string(),
+            title: entry
+                .get("title")
+                .and_then(|t| t.as_str())
+                .unwrap_or("")
+                .to_string(),
+            members: members_of(entry),
+        })
+        .collect())
+}
+
+/// A composite election's members, in the order DRA numbers them.
+fn members_of(entry: &Value) -> Vec<String> {
+    let Some(members) = entry.get("members").and_then(|m| m.as_object()) else {
+        return Vec::new();
+    };
+    let mut keys: Vec<&str> = members.keys().map(|k| k.as_str()).collect();
+    keys.sort_by_key(|k| k.parse::<u32>().unwrap_or(u32::MAX));
+    keys.iter()
+        .filter_map(|k| members[*k].as_str().map(str::to_string))
+        .collect()
+}
+
+/// The dataset list as lines of text, for a terminal.
+pub fn render(path: &Path, rows: &[Dataset]) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(out, "{}\n", path.display());
+    let width = rows.iter().map(|d| d.name.len()).max().unwrap_or(12).max(12);
 
     let mut current: Option<Kind> = None;
-    for (kind, name, entry) in &rows {
-        if current != Some(*kind) {
+    for d in rows {
+        if current != Some(d.kind) {
             if current.is_some() {
-                println!();
+                let _ = writeln!(out);
             }
-            let (heading, flag) = kind.heading();
-            println!("{heading}  ({flag})");
-            current = Some(*kind);
+            let (heading, flag) = d.kind.heading();
+            let _ = writeln!(out, "{heading}  ({flag})");
+            current = Some(d.kind);
         }
-        let title = entry.get("title").and_then(|t| t.as_str()).unwrap_or("");
-        println!("  {name:<width$}  {title}");
-
-        // A composite averages other elections, and which ones is the thing
-        // that decides whether it is the right choice.
-        if let Some(members) = entry.get("members").and_then(|m| m.as_object()) {
-            let mut keys: Vec<&str> = members.keys().map(|k| k.as_str()).collect();
-            keys.sort_by_key(|k| k.parse::<u32>().unwrap_or(u32::MAX));
-            let names: Vec<&str> =
-                keys.iter().filter_map(|k| members[*k].as_str()).collect();
-            println!("  {:<width$}  averages {}", "", names.join(", "));
+        let _ = writeln!(out, "  {:<width$}  {}", d.name, d.title);
+        if !d.members.is_empty() {
+            let _ = writeln!(out, "  {:<width$}  averages {}", "", d.members.join(", "));
         }
     }
-
-    println!();
-    println!("Pass any of these names to the matching option of `rda-ensemble run`,");
-    println!("or `--elections all` to score every election at once.");
-    Ok(())
+    let _ = writeln!(out);
+    let _ = writeln!(
+        out,
+        "Pass any of these names to the matching option of `rda-ensemble run`,"
+    );
+    let _ = writeln!(out, "or `--elections all` to score every election at once.");
+    out
 }
 
 fn year(entry: &Value) -> i64 {

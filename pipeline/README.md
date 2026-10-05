@@ -466,6 +466,37 @@ Three recorded fields change the plans a given `--rng-seed` produces, so a
 reproduction has to match all three: `segment_steps`, `threads` and the DRA
 `dra_version`. `stopped_early` says whether the run finished.
 
+## Using it as a library
+
+The binary is one caller of this crate, not the only possible one — a GUI is
+the reason the seam exists. A caller supplies parameters as `RunArgs`, whose
+fields are public, and receives the narration through an `Events` sink instead
+of stderr:
+
+```rust
+use std::sync::{Arc, Mutex};
+use rda_ensemble::events::{Events, Sink};
+use rda_ensemble::run::{self, Cancel};
+
+struct Window(Mutex<Vec<String>>);
+
+impl Events for Window {
+    fn status(&self, line: &str) { self.0.lock().unwrap().push(line.into()); }
+    fn warn(&self, line: &str)   { self.0.lock().unwrap().push(line.into()); }
+    fn progress(&self, step: u64, total: u64) { /* drive a bar */ }
+}
+
+let ev: Sink = Arc::new(Window(Mutex::new(Vec::new())));
+let cancel = Cancel::default();          // wire this to a Stop button
+run::run(&args, &[], &cancel, &ev)?;
+```
+
+`Cancel` stops the chain at the next segment boundary, so a caller that wants
+a responsive stop sets `segment_steps`. Discovery returns data rather than
+text: `dra::listings` for the states and versions, `datasets::read` for what a
+GeoJSON carries. Each has a `render` beside it that produces the lines the CLI
+prints, so the terminal and a menu are fed from the same place.
+
 ## Building
 
 Three libraries, two of them outside this repository:

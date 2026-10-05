@@ -15,6 +15,12 @@ edition = "2021"
 rust-version = "1.77"
 license = "MIT"
 
+# A library as well as a binary: the GUI front end this is headed for links
+# the library and supplies its own Events sink instead of a terminal.
+[lib]
+name = "rda_ensemble"
+path = "src/lib.rs"
+
 [[bin]]
 name = "rda-ensemble"
 path = "src/main.rs"

@@ -233,9 +233,15 @@ fn find(dir: &Path, suffix: &str) -> Option<PathBuf> {
 }
 
 /// Download and unpack a state's package, or return the cached copy.
-pub fn fetch(cache: &Path, state: &str, version: &str, size: u64) -> Result<Package> {
+pub fn fetch(
+    cache: &Path,
+    state: &str,
+    version: &str,
+    size: u64,
+    ev: &crate::events::Sink,
+) -> Result<Package> {
     if let Some(p) = cached(cache, state, version) {
-        eprintln!("  {state} {version} already in {}", cache.display());
+        ev.status(&format!("  {state} {version} already in {}", cache.display()));
         return Ok(p);
     }
     let dir = cache_path(cache, state, version);
@@ -243,7 +249,7 @@ pub fn fetch(cache: &Path, state: &str, version: &str, size: u64) -> Result<Pack
         .with_context(|| format!("creating {}", dir.display()))?;
 
     let url = package_url(state, version);
-    eprintln!("  downloading {state} {version} ({:.1} MB)", size as f64 / 1e6);
+    ev.status(&format!("  downloading {state} {version} ({:.1} MB)", size as f64 / 1e6));
     let mut bytes = Vec::with_capacity(size as usize);
     ureq::get(&url)
         .set("User-Agent", "rda-ensemble")
@@ -282,10 +288,15 @@ pub fn fetch(cache: &Path, state: &str, version: &str, size: u64) -> Result<Pack
 ///
 /// Only asks GitHub what exists when it has to, so a cached state keeps
 /// working when the rate limit is spent or the network is away.
-pub fn resolve(cache: &Path, state: &str, version: Option<&str>) -> Result<Package> {
+pub fn resolve(
+    cache: &Path,
+    state: &str,
+    version: Option<&str>,
+    ev: &crate::events::Sink,
+) -> Result<Package> {
     if let Some(v) = version {
         if let Some(p) = cached(cache, state, v) {
-            eprintln!("  {state} {v} already in {}", cache.display());
+            ev.status(&format!("  {state} {v} already in {}", cache.display()));
             return Ok(p);
         }
     }
@@ -296,7 +307,10 @@ pub fn resolve(cache: &Path, state: &str, version: Option<&str>) -> Result<Packa
         // state should not depend on GitHub being reachable every time.
         Err(e) => match newest_cached(cache, state) {
             Some(p) => {
-                eprintln!("  could not reach DRA's index, using cached {state} {}", p.version);
+                ev.status(&format!(
+                    "  could not reach DRA's index, using cached {state} {}",
+                    p.version
+                ));
                 return Ok(p);
             }
             None => return Err(e),
@@ -310,11 +324,24 @@ pub fn resolve(cache: &Path, state: &str, version: Option<&str>) -> Result<Packa
         ),
         None => inventory.latest(state)?,
     };
-    fetch(cache, state, &version, size)
+    fetch(cache, state, &version, size, ev)
 }
 
-/// Print what DRA publishes.
-pub fn list(inventory: &Inventory, only: Option<&str>) -> Result<()> {
+/// What DRA publishes for one state.
+pub struct Listing {
+    pub state: String,
+    pub latest: String,
+    /// Bytes, as DRA's index reports them.
+    pub size: u64,
+    /// Every other version, newest first.
+    pub older: Vec<String>,
+}
+
+/// What DRA publishes, one row per state, newest version first.
+///
+/// Returns the rows rather than printing them: this is what fills a state
+/// picker, whether that picker is [`render`] or something with a scrollbar.
+pub fn listings(inventory: &Inventory, only: Option<&str>) -> Result<Vec<Listing>> {
     if let Some(state) = only {
         if inventory.versions(state).is_empty() {
             bail!(
@@ -323,19 +350,42 @@ pub fn list(inventory: &Inventory, only: Option<&str>) -> Result<()> {
             );
         }
     }
-    println!("Dave's Redistricting, {CYCLE} VTD packages\n");
-    println!("  {:<7}{:<9}{:>8}   older", "state", "latest", "size");
-    for (state, versions) in inventory.states() {
-        if only.is_some_and(|s| s != state) {
-            continue;
-        }
-        let (latest, size) = versions.iter().next_back().expect("a state has versions");
-        let older: Vec<&str> =
-            versions.keys().rev().skip(1).map(String::as_str).collect();
-        let older = if older.is_empty() { "-".to_string() } else { older.join(", ") };
-        println!("  {state:<7}{latest:<9}{:>7.1}M   {older}", *size as f64 / 1e6);
-    }
-    println!("\nEach package holds a GeoJSON and DRA's adjacency graph.");
-    println!("`rda-ensemble fetch --state XX` downloads the latest; `run --state XX` does it for you.");
-    Ok(())
+    Ok(inventory
+        .states()
+        .filter(|(state, _)| !only.is_some_and(|s| s != state.as_str()))
+        .map(|(state, versions)| {
+            let (latest, size) = versions.iter().next_back().expect("a state has versions");
+            Listing {
+                state: state.clone(),
+                latest: latest.clone(),
+                size: *size,
+                older: versions.keys().rev().skip(1).cloned().collect(),
+            }
+        })
+        .collect())
 }
+
+/// The listing as lines of text, for a terminal.
+pub fn render(rows: &[Listing]) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(out, "Dave's Redistricting, {CYCLE} VTD packages\n");
+    let _ = writeln!(out, "  {:<7}{:<9}{:>8}   older", "state", "latest", "size");
+    for r in rows {
+        let older = if r.older.is_empty() { "-".to_string() } else { r.older.join(", ") };
+        let _ = writeln!(
+            out,
+            "  {:<7}{:<9}{:>7.1}M   {older}",
+            r.state,
+            r.latest,
+            r.size as f64 / 1e6
+        );
+    }
+    let _ = writeln!(out, "\nEach package holds a GeoJSON and DRA's adjacency graph.");
+    let _ = writeln!(
+        out,
+        "`rda-ensemble fetch --state XX` downloads the latest; `run --state XX` does it for you."
+    );
+    out
+}
+

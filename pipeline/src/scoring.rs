@@ -93,9 +93,11 @@ pub struct ChainState {
     /// previous segment ended on, which is already in the output.
     started: bool,
 
-    /// Drawn from the step numbers below. rustrecom's own bar is per call
-    /// and has no callback, so this is the one the user sees.
-    progress: crate::run::Progress,
+    /// Where progress goes. rustrecom's own bar is per call and has no
+    /// callback, so the step numbers below are the only honest source.
+    events: crate::events::Sink,
+    /// Steps the whole chain will take, for the progress fraction.
+    total: u64,
 
     pub summary: Summary,
 }
@@ -106,7 +108,8 @@ impl ChainState {
         scores: File,
         by_district: File,
         plans: Option<File>,
-        progress: crate::run::Progress,
+        events: crate::events::Sink,
+        total: u64,
     ) -> ChainState {
         ChainState {
             aggs: Aggregates::new(ctx),
@@ -116,7 +119,8 @@ impl ChainState {
             previous: Vec::new(),
             last_step: 0,
             started: false,
-            progress,
+            events,
+            total,
             summary: Summary::default(),
         }
     }
@@ -126,10 +130,6 @@ impl ChainState {
         &self.previous
     }
 
-    /// Clear the progress line, so the closing report starts clean.
-    pub fn finish(&mut self) {
-        self.progress.finish();
-    }
 }
 
 /// One segment's view of the chain. Cheap to make: everything mutable is
@@ -304,7 +304,7 @@ impl StatsWriter for ScoringWriter {
             self.score(&mut st, step, &now).map_err(to_io)?;
         }
         st.last_step = step;
-        st.progress.advance(step);
+        st.events.progress(step, st.total);
         Ok(())
     }
 
@@ -320,7 +320,7 @@ impl StatsWriter for ScoringWriter {
         let from = st.last_step + 1;
         self.replay(&mut st, from, step).map_err(to_io)?;
         st.last_step = step;
-        st.progress.advance(step);
+        st.events.progress(step, st.total);
         Ok(())
     }
 

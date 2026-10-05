@@ -23,6 +23,7 @@ use rustrecom::recom::{RecomParams, RecomVariant};
 use serde_json::Value;
 
 use crate::artifacts::{Artifact, Artifacts};
+use crate::events::Sink;
 use crate::manifest;
 use crate::scoring::{ChainState, ScoringWriter, Summary};
 use crate::settings::Settings;
@@ -54,8 +55,8 @@ impl Cancel {
     }
 }
 
-pub fn run(cli: &RunArgs, keep: &[Artifact], cancel: &Cancel) -> Result<()> {
-    let districts = districts(cli)?;
+pub fn run(cli: &RunArgs, keep: &[Artifact], cancel: &Cancel, ev: &Sink) -> Result<()> {
+    let districts = districts(cli, ev)?;
     let steps = steps(cli)?;
     check(cli, districts, steps)?;
     let started = Instant::now();
@@ -63,8 +64,8 @@ pub fn run(cli: &RunArgs, keep: &[Artifact], cancel: &Cancel) -> Result<()> {
         .with_context(|| format!("creating {}", cli.out.display()))?;
     let artifacts = Artifacts::new(&cli.out, keep);
 
-    let package = resolve_input(cli)?;
-    let Some(ctx) = read_state(cli, districts, steps, &package, &artifacts)? else {
+    let package = resolve_input(cli, ev)?;
+    let Some(ctx) = read_state(cli, ev, districts, steps, &package, &artifacts)? else {
         return Ok(());
     };
     let ctx = Arc::new(ctx);
@@ -78,13 +79,15 @@ pub fn run(cli: &RunArgs, keep: &[Artifact], cancel: &Cancel) -> Result<()> {
             let ctx = ctx.clone();
             let artifacts = &artifacts;
             handles.push(scope.spawn(move || {
-                one_chain(cli, districts, steps, artifacts, ctx, i, cancel)
+                one_chain(cli, districts, steps, artifacts, ctx, i, cancel, ev)
             }));
         }
         handles.into_iter().map(|h| h.join().expect("a chain panicked")).collect()
     })?;
 
-    report_convergence(cli, districts, steps, &package, &ctx, &artifacts, &summaries, started)
+    report_convergence(
+        cli, districts, steps, &package, &ctx, &artifacts, &summaries, started, ev,
+    )
 }
 
 /// Where a chain's own output goes: straight into --out for a single chain,
@@ -106,6 +109,7 @@ fn chain_seed(cli: &RunArgs, index: usize) -> u64 {
 }
 
 /// One chain: draw a starting plan, run it, score as it goes.
+#[allow(clippy::too_many_arguments)]
 fn one_chain(
     cli: &RunArgs,
     districts: usize,
@@ -114,6 +118,7 @@ fn one_chain(
     ctx: Arc<Context>,
     index: usize,
     cancel: &Cancel,
+    ev: &Sink,
 ) -> Result<Summary> {
     let dir = chain_dir(cli, index);
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
@@ -122,9 +127,10 @@ fn one_chain(
     let mine = artifacts.relocated(&dir);
 
     let (order, seed_assignments) =
-        seed_plan(cli, districts, &ctx, &mine, chain_seed(cli, index), index)?;
+        seed_plan(cli, ev, districts, &ctx, &mine, chain_seed(cli, index), index)?;
     chain(
         cli,
+        ev,
         steps,
         &mine,
         ctx,
@@ -142,19 +148,19 @@ fn one_chain(
 /// for something else. Most runs want the statutory one, which is why
 /// --districts is optional: a user who knows they want NC congressional
 /// districts should not also have to know there are 14.
-pub fn districts(cli: &RunArgs) -> Result<usize> {
+pub fn districts(cli: &RunArgs, ev: &Sink) -> Result<usize> {
     let statutory =
         rdarust_core::states::districts_for(&cli.state, cli.chamber.as_str());
     match (cli.districts, statutory) {
         (Some(asked), Some(known)) if asked as u32 != known => {
             // Far more often a typo than a deliberate hypothetical, but the
             // hypothetical is legitimate, so say so and carry on.
-            eprintln!(
-                "warning: {} {} has {known} districts, and --districts says {asked}. \
+            ev.warn(&format!(
+                "{} {} has {known} districts, and --districts says {asked}. \
                  Drawing {asked}.",
                 cli.state,
                 cli.chamber.as_str()
-            );
+            ));
             Ok(asked)
         }
         (Some(asked), _) => Ok(asked),
@@ -165,16 +171,6 @@ pub fn districts(cli: &RunArgs) -> Result<usize> {
             cli.chamber.as_str()
         ),
     }
-}
-
-/// Whether to draw rustrecom's progress bar.
-///
-/// On by default at a terminal: a two-million-step chain runs for half an
-/// hour, and with no output at all somebody will reasonably conclude it has
-/// hung and kill it.
-fn show_progress(cli: &RunArgs) -> bool {
-    use std::io::IsTerminal;
-    !cli.no_progress && std::io::stderr().is_terminal()
 }
 
 /// How many chain steps to run.
@@ -252,7 +248,7 @@ fn check(cli: &RunArgs, districts: usize, steps: u64) -> Result<()> {
 }
 
 /// The GeoJSON to read, downloading it if the command line named no file.
-fn resolve_input(cli: &RunArgs) -> Result<dra::Package> {
+fn resolve_input(cli: &RunArgs, ev: &Sink) -> Result<dra::Package> {
     if let Some(path) = &cli.geojson {
         // DRA ships its graph beside the GeoJSON; look for it there.
         let graph = path.parent().and_then(|dir| {
@@ -267,7 +263,7 @@ fn resolve_input(cli: &RunArgs) -> Result<dra::Package> {
     // One implementation, in dra::resolve: a second copy here drifted from
     // it and lost the offline fallback.
     let cache = cli.cache.clone().unwrap_or_else(dra::default_cache);
-    dra::resolve(&cache, &cli.state, cli.dra_version.as_deref())
+    dra::resolve(&cache, &cli.state, cli.dra_version.as_deref(), ev)
 }
 
 /// Precinct adjacency, from DRA's graph or from the shapes.
@@ -277,6 +273,7 @@ fn resolve_input(cli: &RunArgs) -> Result<dra::Package> {
 /// says so when the two disagree rather than letting a difference pass.
 fn adjacency(
     cli: &RunArgs,
+    ev: &Sink,
     package: &dra::Package,
     geoids: &[String],
     geometries: &[rdarust_geo::Geometry],
@@ -296,12 +293,15 @@ fn adjacency(
     };
 
     let Some(published) = published else {
-        eprintln!("  adjacency derived from the precinct shapes");
+        ev.status("  adjacency derived from the precinct shapes");
         return Ok(rdarust_io::extract_graph(geoids, geometries));
     };
 
     if cli.adjacency == Adjacency::Dra {
-        eprintln!("  adjacency from {}", package.graph.as_ref().expect("checked").display());
+        ev.status(&format!(
+            "  adjacency from {}",
+            package.graph.as_ref().expect("checked").display()
+        ));
         return Ok(published);
     }
 
@@ -310,11 +310,11 @@ fn adjacency(
     let derived = rdarust_io::extract_graph(geoids, geometries);
     let name = package.graph.as_ref().expect("checked").display();
     match disagreements(&published, &derived) {
-        0 => eprintln!("  adjacency from {name}, matching the shapes exactly"),
-        n => eprintln!(
-            "warning: {name} and the precinct shapes disagree about {n} node(s). \
+        0 => ev.status(&format!("  adjacency from {name}, matching the shapes exactly")),
+        n => ev.warn(&format!(
+            "{name} and the precinct shapes disagree about {n} node(s). \
              Using the published graph; --adjacency geometry uses the shapes."
-        ),
+        )),
     }
     Ok(published)
 }
@@ -341,13 +341,14 @@ fn disagreements(a: &[(String, Vec<String>)], b: &[(String, Vec<String>)]) -> us
 /// as JSONL and read back.
 fn read_state(
     cli: &RunArgs,
+    ev: &Sink,
     districts: usize,
     steps: u64,
     package: &dra::Package,
     artifacts: &Artifacts,
 ) -> Result<Option<Context>> {
     let path = &package.geojson;
-    eprintln!("reading {}", path.display());
+    ev.status(&format!("reading {}", path.display()));
     let text = std::fs::read_to_string(path)
         .with_context(|| format!("reading {}", path.display()))?;
     let doc: Value = serde_json::from_str(&text)
@@ -399,7 +400,7 @@ fn read_state(
     )
     .map_err(|e| anyhow!("{e}"))?;
     for w in &warnings {
-        eprintln!("warning: {w}");
+        ev.warn(w);
     }
     let n_elections = data_map
         .get("election")
@@ -415,12 +416,12 @@ fn read_state(
     }
     artifacts.write_json_pretty(Artifact::DataMap, &data_map)?;
 
-    report(cli, districts, steps, &census, &vap, &cvap, &data_map_elections(&data_map));
+    report(cli, ev, districts, steps, &census, &vap, &cvap, &data_map_elections(&data_map));
     if cli.dry_run {
-        eprintln!("\n--dry-run: nothing was written");
+        ev.status("\n--dry-run: nothing was written");
         return Ok(None);
     }
-    eprintln!();
+    ev.status("");
 
     let features = rdarust_io::geojson::features_of(&doc).map_err(|e| anyhow!("{e}"))?;
     drop(text);
@@ -437,7 +438,7 @@ fn read_state(
         .collect();
     let geometries: Vec<_> = features.iter().map(|f| f.geometry.clone()).collect();
 
-    let graph = adjacency(cli, package, &geoids, &geometries)?;
+    let graph = adjacency(cli, ev, package, &geoids, &geometries)?;
     if artifacts.wants(Artifact::Graph) {
         let mut obj = serde_json::Map::new();
         for (geoid, neighbours) in &graph {
@@ -448,7 +449,7 @@ fn read_state(
 
     let precincts =
         rdarust_io::extract_data(&features, &data_map, &graph).map_err(|e| anyhow!("{e}"))?;
-    eprintln!("  {} precincts, {n_elections} election(s)", precincts.len());
+    ev.status(&format!("  {} precincts, {n_elections} election(s)", precincts.len()));
 
     // The precinct stream opens with the data map, which is what tells the
     // reader which column holds which figure. `extract-data` writes the same
@@ -467,7 +468,7 @@ fn read_state(
         .into_context(&cli.state, cli.chamber.as_str(), Some(districts as u32))
         .map_err(|e| anyhow!("{e}"))?;
     for w in &ctx.warnings {
-        eprintln!("warning: {w}");
+        ev.warn(w);
     }
     Ok(Some(ctx))
 }
@@ -486,8 +487,10 @@ fn data_map_elections(data_map: &Value) -> Vec<String> {
 
 /// Print every resolved setting, marking anything the command line did not
 /// say outright.
+#[allow(clippy::too_many_arguments)]
 fn report(
     cli: &RunArgs,
+    ev: &Sink,
     districts: usize,
     steps: u64,
     census: &str,
@@ -582,7 +585,7 @@ fn report(
         )
         .given("column names", if cli.prefixes { "dataset-prefixed" } else { "plain" });
 
-    eprint!("{}", s.render());
+    ev.status(s.render().trim_end_matches('\n'));
 }
 
 /// `COLUMN=WEIGHT` pairs, highest weight first as rustrecom orders them.
@@ -695,6 +698,7 @@ fn check_datasets(
 /// landed in. partigraph numbers parts from 0.
 fn seed_plan(
     cli: &RunArgs,
+    ev: &Sink,
     districts: usize,
     ctx: &Context,
     artifacts: &Artifacts,
@@ -736,9 +740,12 @@ fn seed_plan(
     let weights: Vec<f64> = order.iter().map(|&i| ctx.pop[i as usize] as f64).collect();
 
     if cli.chains <= 1 {
-        eprintln!("drawing a starting plan with {districts} districts");
+        ev.status(&format!("drawing a starting plan with {districts} districts"));
     } else {
-        eprintln!("chain {}: drawing a starting plan with {districts} districts", index + 1);
+        ev.status(&format!(
+            "chain {}: drawing a starting plan with {districts} districts",
+            index + 1
+        ));
     }
     let balanced = partigraph::partition_balanced(
         &graph,
@@ -755,10 +762,10 @@ fn seed_plan(
             "{e}\nA tighter --seed-tolerance is harder to satisfy; try loosening it."
         )
     })?;
-    eprintln!(
+    ev.status(&format!(
         "  worst district is {:.3}% from ideal",
         balanced.worst_deviation() * 100.0
-    );
+    ));
 
     let assignments = balanced.partition.assignments().to_vec();
     if artifacts.wants(Artifact::SeedPlan) {
@@ -776,6 +783,7 @@ fn seed_plan(
 #[allow(clippy::too_many_arguments)]
 fn chain(
     cli: &RunArgs,
+    ev: &Sink,
     steps: u64,
     artifacts: &Artifacts,
     ctx: Arc<Context>,
@@ -850,7 +858,8 @@ fn chain(
         scores,
         by_district,
         plans,
-        Progress::new(steps, show_progress(cli) && cli.chains == 1),
+        ev.clone(),
+        steps,
     )));
 
     let opts = ScoreOptions {
@@ -864,12 +873,15 @@ fn chain(
 
     let plan = segments(steps, cli.segment_steps);
     match cli.segment_steps {
-        Some(n) => eprintln!(
+        Some(n) => ev.status(&format!(
             "running {steps} steps as {} segment(s) of up to {n}, scoring every {}",
             plan.len(),
             cli.sample_every
-        ),
-        None => eprintln!("running {steps} steps, scoring every {}", cli.sample_every),
+        )),
+        None => ev.status(&format!(
+            "running {steps} steps, scoring every {}",
+            cli.sample_every
+        )),
     }
 
     let mut partition = partition;
@@ -918,7 +930,7 @@ fn chain(
             .map_err(|e| anyhow!("resuming the chain after segment {}: {e:?}", segment + 1))?;
     }
 
-    state.lock().expect("chain state").finish();
+    ev.progress_done();
     let mut summary = Arc::try_unwrap(state)
         .map_err(|_| anyhow!("the chain outlived its writer"))?
         .into_inner()
@@ -926,92 +938,14 @@ fn chain(
         .summary;
     summary.stopped = stopped;
     if stopped {
-        eprintln!(
+        ev.status(&format!(
             "  stopped early: {} steps taken, {} plans scored",
             summary.steps, summary.scored
-        );
+        ));
     } else if cli.chains > 1 {
-        eprintln!("chain {}: scored {} plans", index + 1, summary.scored);
+        ev.status(&format!("chain {}: scored {} plans", index + 1, summary.scored));
     }
     Ok(summary)
-}
-
-/// The chain's progress, drawn from the step numbers the writer is handed.
-///
-/// rustrecom's own bar is a `bool` on `multi_chain` with no callback, and it
-/// is sized to one call, so a segmented run would redraw it per segment.
-/// `StatsWriter` is the callback that already exists: every accepted step and
-/// every self-loop arrives with its number, which is exactly a position. One
-/// bar then covers a segmented and an unsegmented run alike.
-///
-/// Silent with `--chains` above 1: several chains writing one line would
-/// interleave into nonsense.
-pub struct Progress {
-    total: u64,
-    started: Instant,
-    last_drawn: Instant,
-    on: bool,
-}
-
-impl Progress {
-    pub fn new(steps: u64, on: bool) -> Progress {
-        let now = Instant::now();
-        Progress { total: steps, started: now, last_drawn: now, on }
-    }
-
-    /// Redraw for `step`, at most ten times a second. A chain reports
-    /// hundreds of thousands of steps, and redrawing on each would cost more
-    /// than the step did.
-    pub fn advance(&mut self, step: u64) {
-        if !self.on {
-            return;
-        }
-        let now = Instant::now();
-        let done = (step + 1).min(self.total);
-        if done < self.total && now.duration_since(self.last_drawn).as_millis() < 100 {
-            return;
-        }
-        self.last_drawn = now;
-        let fraction = done as f64 / self.total as f64;
-        let elapsed = self.started.elapsed().as_secs_f64();
-        // Steps per second so far, projected over what is left. Early
-        // segments give a poor estimate, which is why the elapsed time is
-        // shown beside it rather than only the guess.
-        let remaining = if fraction > 0.0 {
-            elapsed / fraction - elapsed
-        } else {
-            0.0
-        };
-        let width = 40usize;
-        let filled = (fraction * width as f64).round() as usize;
-        eprint!(
-            "\r  [{}{}] {:>3.0}%  {done}/{} steps  {}  eta {}   ",
-            "#".repeat(filled),
-            "-".repeat(width - filled),
-            fraction * 100.0,
-            self.total,
-            clock(elapsed),
-            clock(remaining),
-        );
-    }
-
-    /// Clear the line, so the report that follows starts clean.
-    pub fn finish(&mut self) {
-        if self.on {
-            eprint!("\r{}\r", " ".repeat(90));
-        }
-    }
-}
-
-/// Seconds as h:mm:ss, or m:ss below an hour.
-fn clock(seconds: f64) -> String {
-    let s = seconds.max(0.0) as u64;
-    let (h, m, s) = (s / 3600, (s % 3600) / 60, s % 60);
-    if h > 0 {
-        format!("{h}:{m:02}:{s:02}")
-    } else {
-        format!("{m}:{s:02}")
-    }
 }
 
 /// How the chain's steps divide into segments.
@@ -1057,18 +991,19 @@ fn report_convergence(
     artifacts: &Artifacts,
     summaries: &[Summary],
     started: Instant,
+    ev: &Sink,
 ) -> Result<()> {
     let series: Vec<_> = summaries.iter().map(|s| s.series.clone()).collect();
     let report = crate::diagnostics::Report::build(&series);
     let scored: u64 = summaries.iter().map(|s| s.scored).sum();
     let taken = summaries.iter().map(|s| s.steps).max().unwrap_or(0);
 
-    eprintln!(
+    ev.status(&format!(
         "\nscored {scored} plans over {} chain(s), to step {taken}, in {:.1}s",
         summaries.len(),
         started.elapsed().as_secs_f64()
-    );
-    eprint!("{}", report.render());
+    ));
+    ev.status(report.render().trim_end_matches('\n'));
 
     let combined = Summary {
         steps: taken,
@@ -1096,20 +1031,23 @@ fn report_convergence(
     serde_json::to_writer_pretty(&mut file, &report.to_value())?;
     file.write_all(b"\n")?;
 
-    eprintln!("\nwrote {}", cli.out.display());
+    ev.status(&format!("\nwrote {}", cli.out.display()));
     let inside = if cli.chains > 1 {
-        eprintln!("  chain_1/ .. chain_{}/  one directory per chain, each holding:", cli.chains);
+        ev.status(&format!(
+            "  chain_1/ .. chain_{}/  one directory per chain, each holding:",
+            cli.chains
+        ));
         "    "
     } else {
         ""
     };
-    eprintln!("  {inside}scores.csv          one row per scored plan");
-    eprintln!("  {inside}by_district.jsonl   the same plans, district by district");
-    eprintln!("  manifest.json       what this run was, so it can be repeated");
-    eprintln!("  diagnostics.json    R-hat and effective sample size, per score");
+    ev.status(&format!("  {inside}scores.csv          one row per scored plan"));
+    ev.status(&format!("  {inside}by_district.jsonl   the same plans, district by district"));
+    ev.status("  manifest.json       what this run was, so it can be repeated");
+    ev.status("  diagnostics.json    R-hat and effective sample size, per score");
     for what in Artifact::ALL {
         if artifacts.wants(what) {
-            eprintln!("  {:<20}{}", what.file_name(), what.describe());
+            ev.status(&format!("  {:<20}{}", what.file_name(), what.describe()));
         }
     }
     Ok(())
