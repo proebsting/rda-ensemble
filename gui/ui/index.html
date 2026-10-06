@@ -4,110 +4,158 @@
 <meta charset="utf-8">
 <title>rda-ensemble</title>
 <style>
+  /* Contrast is deliberate: every text colour here is at least 7:1 against
+     the surface behind it, which is WCAG AAA for body text. The dim colour
+     is for secondary text, not for text nobody needs to read. */
   :root {
-    --bg: #fbfbfa; --panel: #fff; --ink: #1c1c1a; --dim: #6a6a66;
-    --line: #dcdcd6; --accent: #2b5f8e; --warn: #8a5a00; --bad: #9a2a2a;
-    --ok: #2a6a3a;
+    --bg: #f2f3f4; --panel: #ffffff; --ink: #121416; --dim: #4b5157;
+    --line: #c4c8cc; --accent: #14508a; --accent-ink: #ffffff;
+    --warn: #7a4a00; --bad: #991b1b; --ok: #15603a;
+    --need: #991b1b; --need-bg: #fdf2f2;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #1b1c1e; --panel: #232528; --ink: #e8e8e4; --dim: #9a9a95;
-      --line: #3a3d41; --accent: #7fb3e0; --warn: #d6a44a; --bad: #e08080;
-      --ok: #7fc08f;
+      --bg: #121315; --panel: #1c1e21; --ink: #f3f5f7; --dim: #aeb5bb;
+      --line: #3a3f45; --accent: #8fc3f2; --accent-ink: #0d1b2a;
+      --warn: #e0ab55; --bad: #f09a9a; --ok: #86d3a2;
+      --need: #f09a9a; --need-bg: #2a1d1d;
     }
   }
   * { box-sizing: border-box; }
   body {
     margin: 0; background: var(--bg); color: var(--ink);
-    font: 13px/1.5 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+    font: 15px/1.55 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
   }
+
+  /* ---- header, tabs, and the running tally of what is still wanted ---- */
   header {
-    padding: 14px 20px; border-bottom: 1px solid var(--line);
-    display: flex; align-items: baseline; gap: 12px;
-    position: sticky; top: 0; background: var(--bg); z-index: 5;
+    position: sticky; top: 0; z-index: 10;
+    background: var(--bg); border-bottom: 1px solid var(--line);
   }
-  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
-  header .sub { color: var(--dim); }
-  main { padding: 18px 20px 40px; max-width: 1000px; }
+  .title { padding: 12px 22px 0; display: flex; align-items: baseline; gap: 12px; }
+  .title h1 { font-size: 17px; margin: 0; font-weight: 650; }
+  .title .sub { color: var(--dim); font-size: 14px; }
+  nav { display: flex; gap: 2px; padding: 10px 22px 0; }
+  nav button {
+    font: inherit; font-size: 15px; padding: 7px 16px; cursor: pointer;
+    background: none; border: 1px solid transparent; border-bottom: none;
+    border-radius: 7px 7px 0 0; color: var(--dim);
+  }
+  nav button:hover { color: var(--ink); }
+  nav button[aria-selected="true"] {
+    background: var(--panel); border-color: var(--line);
+    color: var(--ink); font-weight: 600;
+    margin-bottom: -1px; padding-bottom: 8px;
+  }
+  #needed {
+    padding: 9px 22px; font-size: 14px;
+    background: var(--need-bg); border-top: 1px solid var(--line);
+    color: var(--need);
+  }
+  #needed.ready { background: none; color: var(--ok); }
+  #needed b { font-weight: 650; }
+  #needed .item { white-space: nowrap; }
+
+  /* ---- panels ---- */
+  main { padding: 20px 22px 30px; max-width: 1060px; }
   fieldset {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
-    margin: 0 0 16px; padding: 14px 16px 16px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 7px;
+    margin: 0 0 18px; padding: 16px 18px 18px;
   }
-  legend { font-weight: 600; padding: 0 6px; }
-  .note { color: var(--dim); margin: -4px 0 12px; }
+  legend { font-weight: 650; padding: 0 7px; font-size: 15px; }
+  .note { color: var(--dim); margin: -4px 0 14px; font-size: 14px; }
   .grid {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-    gap: 12px 16px;
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 15px 18px;
   }
   label { display: block; }
-  label .name { display: block; margin-bottom: 3px; }
-  label .hint { display: block; color: var(--dim); font-size: 11.5px; margin-top: 3px; }
+  label .name { display: block; margin-bottom: 4px; font-weight: 550; }
+  label .hint { display: block; color: var(--dim); font-size: 13px; margin-top: 4px; }
   input[type=text], input[type=number], select, textarea {
-    width: 100%; padding: 5px 7px; border: 1px solid var(--line);
-    border-radius: 4px; background: var(--bg); color: var(--ink);
-    font: inherit;
+    width: 100%; padding: 7px 9px; border: 1px solid var(--line);
+    border-radius: 5px; background: var(--panel); color: var(--ink);
+    font: inherit; font-size: 15px;
   }
-  select[multiple] { height: 108px; }
-  textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-  .checks { display: flex; flex-wrap: wrap; gap: 6px 18px; }
-  .checks label { display: flex; align-items: center; gap: 6px; }
-  .req { color: var(--bad); }
+  input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  select[multiple] { height: 130px; }
+  .checks { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+  .checks label { display: flex; align-items: center; gap: 7px; font-weight: 450; }
+  input[type=checkbox] { width: 15px; height: 15px; }
+
+  /* A field the run still wants: marked where it is, not only in a list. */
+  .wants input, .wants select { border-color: var(--need); border-width: 2px; }
+  .wants .name::after {
+    content: " needed"; color: var(--need); font-weight: 600; font-size: 13px;
+  }
+
   button {
-    font: inherit; padding: 6px 14px; border-radius: 5px;
+    font: inherit; font-size: 15px; padding: 8px 17px; border-radius: 6px;
     border: 1px solid var(--line); background: var(--panel); color: var(--ink);
     cursor: pointer;
   }
   button:hover:not(:disabled) { border-color: var(--accent); }
   button:disabled { opacity: .45; cursor: default; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  button.primary {
+    background: var(--accent); border-color: var(--accent); color: var(--accent-ink);
+    font-weight: 600;
+  }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .small { padding: 3px 10px; font-size: 14px; }
+
   #bar {
-    height: 8px; background: var(--line); border-radius: 4px; overflow: hidden;
-    flex: 1; min-width: 160px;
+    height: 10px; background: var(--line); border-radius: 5px; overflow: hidden;
+    flex: 1; min-width: 170px;
   }
   #bar div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
   #log {
-    margin-top: 12px; background: var(--bg); border: 1px solid var(--line);
-    border-radius: 4px; padding: 8px 10px; height: 230px; overflow-y: auto;
+    margin-top: 14px; background: var(--bg); border: 1px solid var(--line);
+    border-radius: 5px; padding: 10px 12px; height: 250px; overflow-y: auto;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 11.5px; white-space: pre-wrap;
+    font-size: 13.5px; line-height: 1.5; white-space: pre-wrap;
   }
   #log .w { color: var(--warn); }
   #log .e { color: var(--bad); }
-  #log .k { color: var(--ok); }
-  .msg { margin-top: 10px; }
+  #log .k { color: var(--ok); font-weight: 600; }
+  .msg { margin-top: 12px; font-size: 14.5px; }
   .msg.warn { color: var(--warn); }
   .msg.bad { color: var(--bad); }
   .msg.ok { color: var(--ok); }
-  ul.warnings { margin: 8px 0 0; padding-left: 18px; color: var(--warn); }
-  details > summary {
-    cursor: pointer; font-weight: 600; padding: 2px 0; list-style-position: outside;
-  }
-  details[open] > summary { margin-bottom: 10px; }
-  table.cache { border-collapse: collapse; width: 100%; margin-top: 4px; }
+  ul.warnings { margin: 10px 0 0; padding-left: 20px; color: var(--warn); font-size: 14px; }
+
+  table.cache { border-collapse: collapse; width: 100%; margin-top: 6px; }
   table.cache th, table.cache td {
-    text-align: left; padding: 3px 10px 3px 0; border-bottom: 1px solid var(--line);
+    text-align: left; padding: 5px 12px 5px 0; border-bottom: 1px solid var(--line);
   }
-  table.cache th { color: var(--dim); font-weight: 500; }
+  table.cache th { color: var(--dim); font-weight: 550; font-size: 14px; }
   table.cache td.n { text-align: right; font-variant-numeric: tabular-nums; }
-  table.cache button { padding: 1px 8px; font-size: 11.5px; }
-  .total { color: var(--dim); margin-top: 8px; }
+  .total { color: var(--dim); margin-top: 10px; }
 </style>
 </head>
 <body>
+
 <header>
-  <h1>rda-ensemble</h1>
-  <span class="sub">redistricting ensembles from Dave&rsquo;s Redistricting data</span>
+  <div class="title">
+    <h1>rda-ensemble</h1>
+    <span class="sub">redistricting ensembles from Dave&rsquo;s Redistricting data</span>
+  </div>
+  <nav role="tablist">
+    <button role="tab" data-tab="build" aria-selected="true">Build an ensemble</button>
+    <button role="tab" data-tab="extend" aria-selected="false">Extend one</button>
+    <button role="tab" data-tab="downloads" aria-selected="false">Downloads</button>
+  </nav>
+  <!-- Always visible, on every tab: nobody should have to press a button to
+       discover they have not finished filling the form. -->
+  <div id="needed"></div>
 </header>
 
 <main>
-  <!-- Settings file first: it is how most people will start. -->
+<section id="tab-build">
   <fieldset>
     <legend>Settings file</legend>
     <p class="note">
-      A settings file holds every decision below and none of your paths, so it
-      can be sent to someone else. A <code>manifest.json</code> from anyone&rsquo;s
-      output directory can be loaded here too.
+      Holds every decision below and none of your paths, so it can be sent to
+      someone else. A <code>manifest.json</code> from anyone&rsquo;s output
+      directory loads here too.
     </p>
     <div class="row">
       <button id="load">Load settings&hellip;</button>
@@ -119,36 +167,9 @@
   </fieldset>
 
   <fieldset>
-    <legend>Extend an ensemble</legend>
-    <p class="note">
-      Carry an earlier run's chain on for longer. Its settings come from its
-      own directory, not from the form below &mdash; extending is about
-      continuing one chain, and changing its parameters halfway would make it
-      a different one. The earlier run must have been made with
-      <code>keep: plans</code>.
-    </p>
-    <div class="grid">
-      <label><span class="name">Earlier results</span>
-        <input type="text" id="ex_from" placeholder="/path/to/results">
-        <span class="hint" id="ex_hint">a directory from a previous run</span></label>
-      <label><span class="name">Where the longer one goes</span>
-        <input type="text" id="ex_out" placeholder="/path/to/results-longer">
-        <span class="hint">the original is left alone</span></label>
-      <label><span class="name">Add plans</span>
-        <input type="number" id="ex_plans" min="1" placeholder="how many more">
-        <span class="hint">more than it has, not more from the resume point</span></label>
-      <label><span class="name">&nbsp;</span>
-        <button id="extend">Extend</button></label>
-    </div>
-    <div id="ex_msg" class="msg"></div>
-  </fieldset>
-
-  <fieldset>
     <legend>Data</legend>
-    <p class="note">Which state, which published package, and where precinct
-      adjacency comes from.</p>
     <div class="grid">
-      <label><span class="name">State <span class="req">*</span></span>
+      <label id="w-state"><span class="name">State</span>
         <select id="state"></select>
         <span class="hint" id="stateHint">from DRA&rsquo;s index</span></label>
       <label><span class="name">DRA version</span>
@@ -160,7 +181,7 @@
           <option value="dra">dra &mdash; require the published graph</option>
           <option value="geometry">geometry &mdash; derive from shapes</option>
         </select></label>
-      <label><span class="name">Chamber <span class="req">*</span></span>
+      <label><span class="name">Chamber</span>
         <select id="plan_type">
           <option value="congress">congress</option>
           <option value="upper">upper</option>
@@ -176,16 +197,16 @@
     <legend>Datasets</legend>
     <p class="note">
       Give a census cycle, or name all three demographic datasets.
-      <button id="loadDatasets" style="padding:2px 8px">Read this state&rsquo;s datasets</button>
+      <button id="loadDatasets" class="small">Read this state&rsquo;s datasets</button>
     </p>
     <div class="grid">
-      <label><span class="name">Cycle</span>
+      <label id="w-cycle"><span class="name">Cycle</span>
         <input type="number" id="cycle" placeholder="2020">
         <span class="hint">picks the three below for that year</span></label>
       <label><span class="name">Census</span><select id="census"></select></label>
       <label><span class="name">Voting-age pop</span><select id="vap"></select></label>
       <label><span class="name">Citizen VAP</span><select id="cvap"></select></label>
-      <label><span class="name">Elections <span class="req">*</span></span>
+      <label id="w-elections"><span class="name">Elections</span>
         <select id="elections" multiple></select>
         <span class="hint">several may be chosen</span></label>
       <label><span class="name">&nbsp;</span>
@@ -199,7 +220,7 @@
   <fieldset>
     <legend>Starting plan</legend>
     <div class="grid">
-      <label><span class="name">Population tolerance <span class="req">*</span></span>
+      <label id="w-seed_tolerance"><span class="name">Population tolerance</span>
         <input type="number" id="seed_tolerance" step="0.001" placeholder="0.01">
         <span class="hint">how balanced the first plan must be</span></label>
     </div>
@@ -208,15 +229,15 @@
   <fieldset>
     <legend>Chain</legend>
     <div class="grid">
-      <label><span class="name">Plans</span>
+      <label id="w-plans"><span class="name">Plans</span>
         <input type="number" id="plans" min="1" placeholder="how many you want">
         <span class="hint">or give steps instead</span></label>
       <label><span class="name">Steps</span>
         <input type="number" id="steps" min="1" placeholder="chain steps">
         <span class="hint">plans &times; sample every</span></label>
-      <label><span class="name">Sample every <span class="req">*</span></span>
+      <label id="w-sample_every"><span class="name">Sample every</span>
         <input type="number" id="sample_every" min="1"></label>
-      <label><span class="name">Variant <span class="req">*</span></span>
+      <label><span class="name">Variant</span>
         <select id="variant">
           <option value="cut-edges-ust">cut-edges-ust &mdash; the usual choice</option>
           <option value="cut-edges-region-aware">cut-edges-region-aware</option>
@@ -226,20 +247,20 @@
           <option value="district-pairs-mst">district-pairs-mst</option>
           <option value="reversible">reversible &mdash; needs balance bound</option>
         </select></label>
-      <label><span class="name">Population tolerance <span class="req">*</span></span>
+      <label id="w-tolerance"><span class="name">Population tolerance</span>
         <input type="number" id="tolerance" step="0.001" placeholder="0.05"></label>
-      <label><span class="name">RNG seed <span class="req">*</span></span>
-        <input type="number" id="rng_seed" min="0">
-        <span class="hint">any number; write it down</span></label>
+      <label id="w-rng_seed"><span class="name">RNG seed</span>
+        <input type="number" id="rng_seed" min="0" placeholder="any number">
+        <span class="hint">write it down; it reproduces the ensemble</span></label>
       <label><span class="name">Chains</span>
         <input type="number" id="chains" min="1">
         <span class="hint">4 lets R-hat work</span></label>
       <label><span class="name">Segment steps</span>
         <input type="number" id="segment_steps" min="1" placeholder="not segmented">
         <span class="hint">needed to stop a run; changes the ensemble</span></label>
-      <label><span class="name">Balance upper bound</span>
+      <label id="w-balance_ub"><span class="name">Balance upper bound</span>
         <input type="number" id="balance_ub" min="0" placeholder="reversible only"></label>
-      <label><span class="name">Region weights</span>
+      <label id="w-region_weights"><span class="name">Region weights</span>
         <input type="text" id="region_weights" placeholder="COUNTY=1.0">
         <span class="hint">comma separated; region-aware variants only</span></label>
       <label><span class="name">Target population</span>
@@ -256,53 +277,84 @@
   <fieldset>
     <legend>Output</legend>
     <div class="grid">
-      <label><span class="name">Output directory <span class="req">*</span></span>
+      <label id="w-out"><span class="name">Output directory</span>
         <input type="text" id="out" placeholder="/path/to/results">
         <span class="hint">not saved in the settings file</span></label>
       <label><span class="name">Package cache</span>
         <input type="text" id="cache">
         <span class="hint">not saved in the settings file</span></label>
     </div>
-    <div style="margin-top:12px">
-      <span class="name">Keep intermediates</span>
-      <div class="checks" id="keep" style="margin-top:4px"></div>
+    <div style="margin-top:14px">
+      <span class="name" style="font-weight:550">Keep intermediates</span>
+      <div class="checks" id="keep" style="margin-top:6px"></div>
     </div>
-    <div class="checks" style="margin-top:12px">
+    <div class="checks" style="margin-top:14px">
       <label><input type="checkbox" id="prefixes"> Prefix score columns with their dataset</label>
       <label><input type="checkbox" id="reverse_weight_splitting"> Reverse-weight county splitting</label>
     </div>
   </fieldset>
+</section>
 
+<section id="tab-extend" hidden>
   <fieldset>
-    <details id="cachePanel">
-      <summary>What has been downloaded</summary>
-      <p class="note">
-        One directory per state <em>and</em> version, so pinning an older
-        version never evicts a newer one. It adds up: every state is about
-        780&nbsp;MB.
-      </p>
-      <div class="row">
-        <button id="cacheRefresh">Refresh</button>
-        <button id="cacheForgetAll">Forget everything</button>
-        <button id="cacheForgetIndex">Forget the index</button>
-      </div>
-      <table class="cache" id="cacheTable"></table>
-      <div class="total" id="cacheTotal"></div>
-    </details>
-  </fieldset>
-
-  <fieldset>
-    <legend>Run</legend>
-    <div class="row">
-      <button id="check">Check settings</button>
-      <button id="start" class="primary">Run</button>
-      <button id="stop" disabled>Stop</button>
-      <div id="bar"><div></div></div>
-      <span id="pct" class="sub"></span>
+    <legend>Extend an ensemble</legend>
+    <p class="note">
+      Carry an earlier run&rsquo;s chain on for longer. Its settings come from
+      its own directory, not from the Build tab &mdash; extending continues one
+      chain, and changing its parameters halfway would make it a different one.
+      The earlier run must have kept its plans.
+    </p>
+    <div class="grid">
+      <label><span class="name">Earlier results</span>
+        <input type="text" id="ex_from" placeholder="/path/to/results">
+        <span class="hint" id="ex_hint">a directory from a previous run</span></label>
+      <label><span class="name">Where the longer one goes</span>
+        <input type="text" id="ex_out" placeholder="/path/to/results-longer">
+        <span class="hint">the original is left alone</span></label>
+      <label><span class="name">Add plans</span>
+        <input type="number" id="ex_plans" min="1" placeholder="how many more">
+        <span class="hint">more than it has, not more from the resume point</span></label>
+      <label><span class="name">&nbsp;</span>
+        <button id="extend" class="primary">Extend</button></label>
     </div>
-    <div id="msg" class="msg"></div>
-    <div id="log"></div>
+    <p class="note" style="margin:14px 0 0">
+      If that run was segmented the result is byte-identical to one run of the
+      full length. If it was not, the chain is still continued &mdash; valid,
+      since ReCom is Markov &mdash; but it will not match.
+    </p>
   </fieldset>
+</section>
+
+<section id="tab-downloads" hidden>
+  <fieldset>
+    <legend>What has been downloaded</legend>
+    <p class="note">
+      One directory per state <em>and</em> version, so pinning an older version
+      never evicts a newer one. It adds up: every state is about 780&nbsp;MB.
+    </p>
+    <div class="row">
+      <button id="cacheRefresh">Refresh</button>
+      <button id="cacheForgetAll">Forget everything</button>
+      <button id="cacheForgetIndex">Forget the index</button>
+    </div>
+    <table class="cache" id="cacheTable"></table>
+    <div class="total" id="cacheTotal"></div>
+  </fieldset>
+</section>
+
+<!-- Outside the tabs: one run at a time, so one place to watch it. -->
+<fieldset>
+  <legend>Progress</legend>
+  <div class="row">
+    <button id="check">Check settings</button>
+    <button id="start" class="primary">Run</button>
+    <button id="stop" disabled>Stop</button>
+    <div id="bar"><div></div></div>
+    <span id="pct" class="sub"></span>
+  </div>
+  <div id="msg" class="msg"></div>
+  <div id="log"></div>
+</fieldset>
 </main>
 
 <script>
@@ -314,11 +366,10 @@ const $ = id => document.getElementById(id);
 // The form, declared once.
 //
 // Every key of the Settings struct appears here exactly once, and reading and
-// writing the form both walk this list. That is what keeps the downloaded file
-// and the form from drifting apart: there is no per-field code to forget to
-// update. `audit()` below checks the list against what the backend actually
-// sends, so a field added in Rust and not here is reported rather than
-// silently dropped.
+// writing the form both walk this list, so the downloaded file cannot drift
+// from what the form collects. `audit()` checks the list against what the
+// backend sends, so a field added in Rust and not here is reported rather than
+// dropped silently.
 // ---------------------------------------------------------------------------
 const FIELDS = [
   ['state', 'str'], ['plan_type', 'str'], ['districts', 'optnum'],
@@ -333,8 +384,16 @@ const FIELDS = [
   ['keep', 'checks'], ['prefixes', 'bool'], ['reverse_weight_splitting', 'bool'],
 ];
 
+// Two things the run needs that `Settings::missing` cannot speak for: a seed
+// of zero is a perfectly good seed, so only a blank box means undecided; and
+// the output directory is not part of the settings at all.
+const BLANK_MEANS_UNDECIDED = {
+  rng_seed: 'A seed. Any number will do, but write it down.',
+  out: 'Where the results go.',
+};
+
 const KEEPS = ['data-map', 'graph', 'data', 'recom-graph', 'seed-plan', 'plans'];
-let version = 1;          // carried through from whatever was loaded
+let version = 1;
 let running = false;
 
 for (const k of KEEPS) {
@@ -367,8 +426,8 @@ function write(key, kind, v) {
     case 'csv': el.value = (v || []).join(', '); break;
     case 'multi': {
       const want = new Set(v || []);
-      // Options are filled from the file itself when the state's datasets
-      // have not been read yet, so a loaded file is never silently emptied.
+      // Options come from the file itself when the state's datasets have not
+      // been read yet, so a loaded file is never silently emptied.
       for (const name of want) {
         if (![...el.options].some(o => o.value === name)) el.add(new Option(name, name));
       }
@@ -394,15 +453,43 @@ const fill = s => {
   for (const [k, kind] of FIELDS) write(k, kind, s[k]);
 };
 
-/// Report any Settings field the form does not cover, rather than dropping it.
 function audit(defaults) {
   const mine = new Set(FIELDS.map(([k]) => k));
   mine.add('version');
-  const missing = Object.keys(defaults).filter(k => !mine.has(k));
-  if (missing.length) {
-    say(`This build has settings the window does not show: ${missing.join(', ')}. ` +
+  const absent = Object.keys(defaults).filter(k => !mine.has(k));
+  if (absent.length) {
+    say(`This build has settings the window does not show: ${absent.join(', ')}. ` +
         `They will keep their defaults. Please report this.`, 'bad');
   }
+}
+
+// --- what is still wanted --------------------------------------------------
+// The list comes from the same Rust that refuses an incomplete run, so the
+// form cannot ask for one thing and the run require another.
+async function refresh() {
+  let wanted = [];
+  try { wanted = await invoke('missing', { settings: collect() }); }
+  catch (e) { /* malformed input mid-typing; the next keystroke tries again */ }
+
+  for (const [field, says] of Object.entries(BLANK_MEANS_UNDECIDED)) {
+    if ($(field).value.trim() === '') wanted.push({ field, says });
+  }
+
+  for (const el of document.querySelectorAll('.wants')) el.classList.remove('wants');
+  for (const w of wanted) $('w-' + w.field)?.classList.add('wants');
+
+  const box = $('needed');
+  if (wanted.length === 0) {
+    box.className = 'ready';
+    box.innerHTML = '<b>Ready to run.</b>';
+  } else {
+    box.className = '';
+    box.innerHTML = '<b>Still needed:</b> ' +
+      wanted.map(w => `<span class="item" title="${w.says.replace(/"/g, '&quot;')}">${w.field.replace(/_/g, ' ')}</span>`)
+            .join(' &middot; ');
+  }
+  $('start').disabled = running || wanted.length > 0;
+  await showWarnings();
 }
 
 // --- log and status --------------------------------------------------------
@@ -466,6 +553,7 @@ async function loadDatasets() {
       $('elections').add(o);
     }
     say(`${rows.length} datasets.`, 'ok');
+    await refresh();
   } catch (e) { say(String(e), 'bad'); }
 }
 
@@ -492,7 +580,7 @@ $('file').onchange = async e => {
     versionsFor(s.state);
     $('fileMsg').textContent = `loaded ${f.name}`;
     say('Settings loaded. The output directory is yours to choose.', 'ok');
-    await showWarnings();
+    await refresh();
   } catch (err) { say(String(err), 'bad'); }
   e.target.value = '';
 };
@@ -510,16 +598,13 @@ async function showWarnings() {
 // --- running ---------------------------------------------------------------
 function busy(on) {
   running = on;
-  $('start').disabled = on;
   $('check').disabled = on;
   $('extend').disabled = on;
-  // An extension inherits the earlier run's segmentation, which is in the
-  // form because choosing the directory filled it in.
   $('stop').disabled = !on || !$('segment_steps').value;
+  if (on) $('start').disabled = true; else refresh();
 }
 
 $('check').onclick = async () => {
-  if (!$('out').value) { say('An output directory is needed.', 'warn'); return; }
   say('Checking…');
   try {
     await invoke('check', {
@@ -530,7 +615,6 @@ $('check').onclick = async () => {
 };
 
 $('start').onclick = async () => {
-  if (!$('out').value) { say('An output directory is needed.', 'warn'); return; }
   $('log').innerHTML = '';
   say('');
   if (!$('segment_steps').value) {
@@ -564,9 +648,6 @@ listen('done', e => {
 });
 
 // --- extending -------------------------------------------------------------
-// Showing the earlier run's settings in the form is honest about what will
-// actually be used: the parameters come from that directory, not from
-// whatever happens to be typed here.
 $('ex_from').onchange = async () => {
   const path = $('ex_from').value.trim();
   if (!path) { $('ex_hint').textContent = 'a directory from a previous run'; return; }
@@ -574,8 +655,9 @@ $('ex_from').onchange = async () => {
     const s = await invoke('settings_at', { path });
     fill(s);
     versionsFor(s.state);
-    $('ex_hint').textContent = `${s.state} ${s.plan_type}, ${s.steps ?? '?'} steps — shown below`;
-    await showWarnings();
+    $('ex_hint').textContent =
+      `${s.state} ${s.plan_type}, ${s.steps ?? '?'} steps — loaded into Build`;
+    await refresh();
   } catch (e) { $('ex_hint').textContent = String(e); }
 };
 
@@ -589,8 +671,7 @@ $('extend').onclick = async () => {
     await invoke('start_extend', {
       from, out,
       plans: Number($('ex_plans').value),
-      steps: null,
-      segmentSteps: null,
+      steps: null, segmentSteps: null,
       cache: $('cache').value || null,
     });
     busy(true);
@@ -610,6 +691,7 @@ async function showCache() {
       `<td class="n">${(c.bytes / 1e6).toFixed(1)} MB</td>` +
       `<td>${c.has_graph ? 'DRA graph' : 'shapes only'}</td><td></td>`;
     const b = document.createElement('button');
+    b.className = 'small';
     b.textContent = 'Forget';
     b.onclick = () => forget(c.state, c.version);
     tr.lastElementChild.appendChild(b);
@@ -639,13 +721,30 @@ async function forget(state, version, index = false) {
 $('cacheRefresh').onclick = showCache;
 $('cacheForgetAll').onclick = () => forget(null, null);
 $('cacheForgetIndex').onclick = () => forget(null, null, true);
-$('cachePanel').addEventListener('toggle', e => { if (e.target.open) showCache(); });
+
+// --- tabs ------------------------------------------------------------------
+for (const b of document.querySelectorAll('nav button')) {
+  b.onclick = () => {
+    for (const other of document.querySelectorAll('nav button')) {
+      other.setAttribute('aria-selected', String(other === b));
+    }
+    for (const s of document.querySelectorAll('main > section')) {
+      s.hidden = s.id !== 'tab-' + b.dataset.tab;
+    }
+    if (b.dataset.tab === 'downloads') showCache();
+  };
+}
 
 // --- wiring ----------------------------------------------------------------
 $('state').onchange = () => versionsFor($('state').value);
 $('loadDatasets').onclick = loadDatasets;
-$('segment_steps').oninput = () => { if (running) busy(true); };
-for (const [k] of FIELDS) $(k).addEventListener('change', showWarnings);
+for (const [k] of FIELDS) {
+  $(k).addEventListener('change', refresh);
+  $(k).addEventListener('input', refresh);
+}
+for (const k of Object.keys(BLANK_MEANS_UNDECIDED)) {
+  $(k).addEventListener('input', refresh);
+}
 
 (async function init() {
   const defaults = await invoke('form_defaults');
@@ -653,7 +752,7 @@ for (const [k] of FIELDS) $(k).addEventListener('change', showWarnings);
   fill(defaults);
   $('cache').value = await invoke('default_cache');
   await loadStates();
-  await showWarnings();
+  await refresh();
 })();
 </script>
 </body>

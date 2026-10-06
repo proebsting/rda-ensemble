@@ -23,10 +23,36 @@ through `window.__TAURI__`.
 
 ## What it shows
 
-Every decision a run makes — all 28 of them — on one page, grouped as the
-`--help` is: data, datasets, starting plan, chain, output. Nothing is hidden
-behind an "advanced" disclosure yet. That is deliberate for now: it is easier
-to learn which settings nobody touches by watching than by guessing.
+Three tabs, for three jobs that share nothing:
+
+- **Build an ensemble** — every decision a run makes, all 28 of them, grouped
+  as the `--help` is: data, datasets, starting plan, chain, output.
+- **Extend one** — continuing an earlier run's chain. It takes a directory,
+  not the form.
+- **Downloads** — what is cached and how much room it takes. Maintenance, not
+  part of building anything.
+
+Progress and the log sit below the tabs rather than inside one, because only
+one job runs at a time and switching tabs should not lose sight of it.
+
+Nothing is hidden behind an "advanced" disclosure yet. That is deliberate for
+now: it is easier to learn which settings nobody touches by watching than by
+guessing.
+
+### What is still needed
+
+A strip under the tabs lists every decision the run wants and has not been
+given, and the fields themselves are outlined where they sit. It updates as
+you type. Nobody should have to press a button to discover they have not
+finished filling in a form.
+
+That list is not written here. It comes from `Settings::missing` in the
+library — the same function `into_args` calls to refuse an incomplete run — so
+the form cannot ask for one thing while the run requires another.
+
+Two exceptions it cannot cover, both handled in the page and commented there:
+a seed of zero is a perfectly good seed, so only an empty box means undecided;
+and the output directory is not part of the settings at all.
 
 The state menu comes from DRA's index; the dataset menus come from the chosen
 state's GeoJSON, which is why they are empty until **Read this state's

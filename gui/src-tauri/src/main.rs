@@ -10,7 +10,7 @@ use rda_ensemble::datasets::{self, Dataset};
 use rda_ensemble::dra::{self, Cached, Listing};
 use rda_ensemble::events::{Events, Sink};
 use rda_ensemble::run::{self, Cancel};
-use rda_ensemble::settings::Settings;
+use rda_ensemble::settings::{Missing, Settings};
 use rda_ensemble::extend;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -123,6 +123,13 @@ fn parse_settings(text: String) -> Result<Settings, String> {
 #[tauri::command]
 fn settings_json(settings: Settings) -> String {
     settings.to_json()
+}
+
+/// Every decision the run still wants, so the form can say so as it is
+/// filled in rather than when a button is pressed.
+#[tauri::command]
+fn missing(settings: Settings) -> Vec<Missing> {
+    settings.missing()
 }
 
 /// Anything that would stop someone else reproducing this run.
@@ -287,6 +294,7 @@ fn main() {
             parse_settings,
             settings_json,
             portability_warnings,
+            missing,
             check,
             start,
             start_extend,

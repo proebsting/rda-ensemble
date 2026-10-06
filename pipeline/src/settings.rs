@@ -29,6 +29,21 @@ use crate::{Adjacency, Chamber, KeepArg, RunArgs, Variant};
 /// incompletely. A new optional field does not need it.
 pub const VERSION: u32 = 1;
 
+/// A decision the run needs and has not been given.
+///
+/// Reported rather than merely refused, so a form can say what is still
+/// wanted before anyone presses anything. `field` names the setting; the
+/// front end decides whether that means a red outline or a sentence.
+#[derive(Debug, Clone, Serialize)]
+pub struct Missing {
+    pub field: String,
+    pub says: String,
+}
+
+fn want(field: &str, says: &str) -> Missing {
+    Missing { field: field.into(), says: says.into() }
+}
+
 /// Everything a run decides, portable between machines.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Settings {
@@ -182,6 +197,71 @@ impl Settings {
         }
     }
 
+    /// Every decision still wanted, in the order a form presents them.
+    ///
+    /// This is the one place the rules live. [`Settings::into_args`] refuses
+    /// a run by calling it, and a front end shows the same list as it is
+    /// filled in, so what the form asks for and what the run requires cannot
+    /// drift apart.
+    ///
+    /// Note what is *not* here. `rng_seed` of zero is a perfectly good seed,
+    /// so nothing in the data distinguishes "unset" from "zero"; a form that
+    /// wants to insist on a deliberate choice has to notice its own blank
+    /// field. The same goes for an output directory, which these settings do
+    /// not carry at all.
+    pub fn missing(&self) -> Vec<Missing> {
+        let mut out = Vec::new();
+        if self.state.trim().is_empty() {
+            out.push(want("state", "Which state the plan is for."));
+        }
+        if self.cycle.is_none()
+            && (self.census.is_none() || self.vap.is_none() || self.cvap.is_none())
+        {
+            out.push(want(
+                "cycle",
+                "A census cycle, or all three of census, voting-age and citizen \
+                 voting-age datasets.",
+            ));
+        }
+        if self.elections.is_empty() {
+            out.push(want("elections", "At least one election to score."));
+        }
+        if self.seed_tolerance <= 0.0 {
+            out.push(want(
+                "seed_tolerance",
+                "How balanced the starting plan must be, as a fraction above zero.",
+            ));
+        }
+        if self.steps.is_none() && self.plans.is_none() {
+            out.push(want("plans", "How many plans you want, or how many steps to run."));
+        }
+        if self.tolerance <= 0.0 {
+            out.push(want(
+                "tolerance",
+                "How far a district's population may sit from ideal during the \
+                 chain, as a fraction above zero.",
+            ));
+        }
+        if self.sample_every == 0 {
+            out.push(want("sample_every", "Sampling interval, at least 1."));
+        }
+        // Two variants need a parameter nothing else does, and the run fails
+        // deep inside rustrecom without it.
+        if self.variant == "reversible" && self.balance_ub.is_none() {
+            out.push(want(
+                "balance_ub",
+                "Reversible ReCom needs a balance upper bound.",
+            ));
+        }
+        if self.variant.ends_with("region-aware") && self.region_weights.is_empty() {
+            out.push(want(
+                "region_weights",
+                "A region-aware variant needs a weight, such as COUNTY=1.0.",
+            ));
+        }
+        out
+    }
+
     /// Run parameters for these settings, writing into `out`.
     ///
     /// `out` and `cache` come from the caller because they are the two
@@ -195,15 +275,15 @@ impl Settings {
                 env!("CARGO_PKG_VERSION"),
             );
         }
-        if self.steps.is_none() && self.plans.is_none() {
-            bail!("settings must give either `steps` or `plans`");
-        }
-        if self.cycle.is_none()
-            && (self.census.is_none() || self.vap.is_none() || self.cvap.is_none())
-        {
+        let wanted = self.missing();
+        if !wanted.is_empty() {
             bail!(
-                "settings must give either `cycle`, or all three of `census`, \
-                 `vap` and `cvap`"
+                "these settings are incomplete:\n{}",
+                wanted
+                    .iter()
+                    .map(|m| format!("  {}: {}", m.field, m.says))
+                    .collect::<Vec<_>>()
+                    .join("\n")
             );
         }
         Ok(RunArgs {
@@ -449,6 +529,16 @@ mod tests {
     use super::*;
     use clap::Parser;
 
+    /// `Settings::missing` for a set of run parameters.
+    trait PipeMissing {
+        fn pipe_missing(&self) -> Vec<Missing>;
+    }
+    impl PipeMissing for RunArgs {
+        fn pipe_missing(&self) -> Vec<Missing> {
+            Settings::from_args(self).missing()
+        }
+    }
+
     fn args(extra: &[&str]) -> RunArgs {
         let mut argv = vec![
             "rda-ensemble", "run", "--state", "MI", "--plan-type", "congress",
@@ -566,6 +656,48 @@ mod tests {
         s.version = VERSION + 1;
         let e = s.into_args("/tmp/o".into(), None).unwrap_err().to_string();
         assert!(e.contains("newer build"), "{e}");
+    }
+
+    /// The form asks for exactly what the run requires, because both read
+    /// this list.
+    #[test]
+    fn missing_names_each_undecided_thing() {
+        let s = Settings::starting_point();
+        let wanted = s.missing();
+        let fields: Vec<&str> = wanted.iter().map(|m| m.field.as_str()).collect();
+        assert_eq!(
+            fields,
+            ["state", "cycle", "elections", "seed_tolerance", "plans", "tolerance"],
+            "a blank form should want exactly these"
+        );
+        // Nothing is wanted once they are given.
+        assert!(args(&[]).pipe_missing().is_empty());
+    }
+
+    /// Two variants need a parameter the others do not, and without it the
+    /// run fails deep inside rustrecom instead of at the form.
+    #[test]
+    fn variant_specific_requirements_are_reported() {
+        let mut s = Settings::from_args(&args(&[]));
+        s.variant = "reversible".into();
+        assert!(s.missing().iter().any(|m| m.field == "balance_ub"));
+        s.balance_ub = Some(100);
+        assert!(s.missing().is_empty());
+
+        let mut s = Settings::from_args(&args(&[]));
+        s.variant = "cut-edges-region-aware".into();
+        assert!(s.missing().iter().any(|m| m.field == "region_weights"));
+        s.region_weights = vec!["COUNTY=1.0".into()];
+        assert!(s.missing().is_empty());
+    }
+
+    /// Zero is a real seed, so nothing in the data can call it undecided.
+    /// A form has to notice its own empty field; this records why.
+    #[test]
+    fn a_zero_seed_is_not_missing() {
+        let mut s = Settings::from_args(&args(&[]));
+        s.rng_seed = 0;
+        assert!(s.missing().is_empty());
     }
 
     #[test]
