@@ -7,10 +7,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use rda_ensemble::datasets::{self, Dataset};
-use rda_ensemble::dra::{self, Listing};
+use rda_ensemble::dra::{self, Cached, Listing};
 use rda_ensemble::events::{Events, Sink};
 use rda_ensemble::run::{self, Cancel};
 use rda_ensemble::settings::Settings;
+use rda_ensemble::extend;
 use tauri::{AppHandle, Emitter, Manager};
 
 /// What the window is doing, if anything.
@@ -142,36 +143,32 @@ fn check(settings: Settings, out: String, cache: Option<String>) -> Result<(), S
     run::run(&args, &keep, &Cancel::default(), &ev).map_err(|e| format!("{e:#}"))
 }
 
-/// Start a run. Returns as soon as it has started; everything after that
-/// arrives as events.
-#[tauri::command]
-fn start(
-    app: AppHandle,
-    settings: Settings,
-    out: String,
-    cache: Option<String>,
-) -> Result<(), String> {
+/// Claim the one job slot, and hand back the pieces a job needs.
+///
+/// One run at a time: two chains writing the same directory would
+/// interleave their output, and the Stop button has one thing to point at.
+fn begin(app: &AppHandle) -> Result<(Cancel, Sink), String> {
     let state = app.state::<App>();
-    {
-        let job = state.job.lock().expect("job");
-        if job.cancel.is_some() {
-            return Err("a run is already going".into());
-        }
+    let mut job = state.job.lock().expect("job");
+    if job.cancel.is_some() {
+        return Err("a run is already going".into());
     }
-    let args = settings
-        .into_args(PathBuf::from(out), cache_of(cache))
-        .map_err(|e| format!("{e:#}"))?;
-
     let cancel = Cancel::default();
-    state.job.lock().expect("job").cancel = Some(cancel.clone());
-
+    job.cancel = Some(cancel.clone());
     let ev: Sink = Arc::new(Forward {
         app: app.clone(),
         last_progress: Mutex::new(Instant::now()),
     });
+    Ok((cancel, ev))
+}
+
+/// Run `work` off the UI thread, free the job slot, and say how it went.
+fn in_background(
+    app: AppHandle,
+    work: impl FnOnce() -> anyhow::Result<()> + Send + 'static,
+) {
     std::thread::spawn(move || {
-        let keep = rda_ensemble::KeepArg::expand(&args.keep);
-        let outcome = run::run(&args, &keep, &cancel, &ev);
+        let outcome = work();
         app.state::<App>().job.lock().expect("job").cancel = None;
         let _ = match outcome {
             Ok(()) => app.emit("done", serde_json::json!({ "ok": true })),
@@ -181,7 +178,87 @@ fn start(
             ),
         };
     });
+}
+
+/// Start a run. Returns as soon as it has started; everything after that
+/// arrives as events.
+#[tauri::command]
+fn start(
+    app: AppHandle,
+    settings: Settings,
+    out: String,
+    cache: Option<String>,
+) -> Result<(), String> {
+    let (cancel, ev) = begin(&app)?;
+    let args = settings
+        .into_args(PathBuf::from(out), cache_of(cache))
+        .map_err(|e| {
+            app.state::<App>().job.lock().expect("job").cancel = None;
+            format!("{e:#}")
+        })?;
+    in_background(app, move || {
+        let keep = rda_ensemble::KeepArg::expand(&args.keep);
+        run::run(&args, &keep, &cancel, &ev)
+    });
     Ok(())
+}
+
+/// Run an existing ensemble's chain for longer.
+///
+/// The settings come from the earlier run, not from the form: extending is
+/// about continuing one chain, and changing its parameters halfway would
+/// make it a different one.
+#[tauri::command]
+fn start_extend(
+    app: AppHandle,
+    from: String,
+    out: String,
+    plans: Option<u64>,
+    steps: Option<u64>,
+    segment_steps: Option<u64>,
+    cache: Option<String>,
+) -> Result<(), String> {
+    let (cancel, ev) = begin(&app)?;
+    let (from, out) = (PathBuf::from(from), PathBuf::from(out));
+    let cache = cache_of(cache);
+    in_background(app, move || {
+        extend::extend(&from, &out, plans, steps, segment_steps, cache, &ev, &cancel)
+    });
+    Ok(())
+}
+
+/// The settings a finished run used, read from its directory.
+///
+/// The window cannot read the filesystem itself, so this is also how a
+/// settings file is loaded by path rather than through the file picker.
+#[tauri::command]
+fn settings_at(path: String) -> Result<Settings, String> {
+    let path = PathBuf::from(path);
+    let path = if path.is_dir() {
+        extend::record_of(&path).map_err(|e| format!("{e:#}"))?
+    } else {
+        path
+    };
+    Settings::read(&path).map_err(|e| format!("{e:#}"))
+}
+
+/// What has been downloaded, and how much room it takes.
+#[tauri::command]
+fn cache_contents(cache: Option<String>) -> Vec<Cached> {
+    dra::contents(&cache_of(cache).unwrap_or_else(dra::default_cache))
+}
+
+/// Delete cached packages, and say which went.
+#[tauri::command]
+fn cache_forget(
+    cache: Option<String>,
+    state: Option<String>,
+    version: Option<String>,
+    index: bool,
+) -> Result<Vec<Cached>, String> {
+    let dir = cache_of(cache).unwrap_or_else(dra::default_cache);
+    dra::forget(&dir, state.as_deref(), version.as_deref(), index)
+        .map_err(|e| format!("{e:#}"))
 }
 
 /// Ask the chain to stop at the end of the current segment.
@@ -212,6 +289,10 @@ fn main() {
             portability_warnings,
             check,
             start,
+            start_extend,
+            settings_at,
+            cache_contents,
+            cache_forget,
             stop,
         ])
         .run(tauri::generate_context!())

@@ -587,7 +587,14 @@ pub fn real_main(cli: Cli, ev: &Sink) -> Result<()> {
             Ok(())
         }
         Command::Extend { from, out, plans, steps, segment_steps, cache } => {
-            extend::extend(&from, &out, plans, steps, segment_steps, cache, ev)
+            // Segmentation is the earlier run's unless overridden, and that
+            // is what decides whether Ctrl-C has a boundary to stop at.
+            let segmented = segment_steps.is_some()
+                || settings::Settings::read(&extend::record_of(&from)?)
+                    .map(|s| s.segment_steps.is_some())
+                    .unwrap_or(false);
+            let cancel = stop_on_interrupt(ev, segmented);
+            extend::extend(&from, &out, plans, steps, segment_steps, cache, ev, &cancel)
         }
         Command::Cache { cache, forget, dra_version, forget_all, forget_index } => {
             let cache = cache.unwrap_or_else(dra::default_cache);
@@ -624,29 +631,34 @@ pub fn real_main(cli: Cli, ev: &Sink) -> Result<()> {
             let mut args = loaded.into_args(out, cache)?;
             args.dry_run = dry_run;
             let keep = KeepArg::expand(&args.keep);
-            run::run(&args, &keep, &run::Cancel::default(), ev)
+            let cancel = stop_on_interrupt(ev, args.segment_steps.is_some());
+            run::run(&args, &keep, &cancel, ev)
         }
         Command::Run(args) => {
             let keep = KeepArg::expand(&args.keep);
-            let cancel = run::Cancel::default();
-            // Ctrl-C asks the chain to stop at the next segment boundary and
-            // keep what it has, rather than killing the process mid-write.
-            // Without --segment-steps there is no boundary before the end,
-            // so the second Ctrl-C does what the first used to.
-            {
-                let cancel = cancel.clone();
-                let ev = ev.clone();
-                let segmented = args.segment_steps.is_some();
-                let hit = std::sync::atomic::AtomicBool::new(false);
-                let _ = ctrlc::set_handler(move || {
-                    if !segmented || hit.swap(true, std::sync::atomic::Ordering::Relaxed) {
-                        std::process::exit(130);
-                    }
-                    ev.status("\nstopping at the end of this segment; Ctrl-C again to quit now");
-                    cancel.stop();
-                });
-            }
+            let cancel = stop_on_interrupt(ev, args.segment_steps.is_some());
             run::run(&args, &keep, &cancel, ev)
         }
     }
+}
+
+/// A cancel handle that Ctrl-C sets.
+///
+/// Stopping at the next segment boundary keeps what has been scored,
+/// rather than killing the process mid-write. Unsegmented there is no
+/// boundary before the end, so the first Ctrl-C does what it always did;
+/// segmented, the second one does.
+fn stop_on_interrupt(ev: &Sink, segmented: bool) -> run::Cancel {
+    let cancel = run::Cancel::default();
+    let theirs = cancel.clone();
+    let ev = ev.clone();
+    let hit = std::sync::atomic::AtomicBool::new(false);
+    let _ = ctrlc::set_handler(move || {
+        if !segmented || hit.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            std::process::exit(130);
+        }
+        ev.status("\nstopping at the end of this segment; Ctrl-C again to quit now");
+        theirs.stop();
+    });
+    cancel
 }

@@ -68,6 +68,7 @@ struct Earlier {
     base_steps: u64,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn extend(
     from: &Path,
     out: &Path,
@@ -76,6 +77,7 @@ pub fn extend(
     segment_steps: Option<u64>,
     cache: Option<PathBuf>,
     ev: &Sink,
+    cancel: &Cancel,
 ) -> Result<()> {
     let earlier = read_earlier(from)?;
 
@@ -160,7 +162,7 @@ pub fn extend(
         segment_base: earlier.segment_base,
     };
     let keep = KeepArg::expand(&args.keep);
-    run::run_extended(&args, &keep, &Cancel::default(), ev, Some(&extension))
+    run::run_extended(&args, &keep, cancel, ev, Some(&extension))
 }
 
 /// Read the settings, the final plan and the segment count out of a
@@ -235,6 +237,12 @@ fn read_earlier(dir: &Path) -> Result<Earlier> {
         exact: boundary.is_some(),
         why_not,
     })
+}
+
+/// Where a finished run's parameters are written down: its own settings
+/// file, or failing that the manifest beside the results.
+pub fn record_of(dir: &Path) -> Result<PathBuf> {
+    settings_path(dir)
 }
 
 fn settings_path(dir: &Path) -> Result<PathBuf> {

@@ -80,6 +80,18 @@
   .msg.bad { color: var(--bad); }
   .msg.ok { color: var(--ok); }
   ul.warnings { margin: 8px 0 0; padding-left: 18px; color: var(--warn); }
+  details > summary {
+    cursor: pointer; font-weight: 600; padding: 2px 0; list-style-position: outside;
+  }
+  details[open] > summary { margin-bottom: 10px; }
+  table.cache { border-collapse: collapse; width: 100%; margin-top: 4px; }
+  table.cache th, table.cache td {
+    text-align: left; padding: 3px 10px 3px 0; border-bottom: 1px solid var(--line);
+  }
+  table.cache th { color: var(--dim); font-weight: 500; }
+  table.cache td.n { text-align: right; font-variant-numeric: tabular-nums; }
+  table.cache button { padding: 1px 8px; font-size: 11.5px; }
+  .total { color: var(--dim); margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -104,6 +116,31 @@
       <span id="fileMsg" class="sub"></span>
     </div>
     <ul class="warnings" id="portability"></ul>
+  </fieldset>
+
+  <fieldset>
+    <legend>Extend an ensemble</legend>
+    <p class="note">
+      Carry an earlier run's chain on for longer. Its settings come from its
+      own directory, not from the form below &mdash; extending is about
+      continuing one chain, and changing its parameters halfway would make it
+      a different one. The earlier run must have been made with
+      <code>keep: plans</code>.
+    </p>
+    <div class="grid">
+      <label><span class="name">Earlier results</span>
+        <input type="text" id="ex_from" placeholder="/path/to/results">
+        <span class="hint" id="ex_hint">a directory from a previous run</span></label>
+      <label><span class="name">Where the longer one goes</span>
+        <input type="text" id="ex_out" placeholder="/path/to/results-longer">
+        <span class="hint">the original is left alone</span></label>
+      <label><span class="name">Add plans</span>
+        <input type="number" id="ex_plans" min="1" placeholder="how many more">
+        <span class="hint">more than it has, not more from the resume point</span></label>
+      <label><span class="name">&nbsp;</span>
+        <button id="extend">Extend</button></label>
+    </div>
+    <div id="ex_msg" class="msg"></div>
   </fieldset>
 
   <fieldset>
@@ -234,6 +271,24 @@
       <label><input type="checkbox" id="prefixes"> Prefix score columns with their dataset</label>
       <label><input type="checkbox" id="reverse_weight_splitting"> Reverse-weight county splitting</label>
     </div>
+  </fieldset>
+
+  <fieldset>
+    <details id="cachePanel">
+      <summary>What has been downloaded</summary>
+      <p class="note">
+        One directory per state <em>and</em> version, so pinning an older
+        version never evicts a newer one. It adds up: every state is about
+        780&nbsp;MB.
+      </p>
+      <div class="row">
+        <button id="cacheRefresh">Refresh</button>
+        <button id="cacheForgetAll">Forget everything</button>
+        <button id="cacheForgetIndex">Forget the index</button>
+      </div>
+      <table class="cache" id="cacheTable"></table>
+      <div class="total" id="cacheTotal"></div>
+    </details>
   </fieldset>
 
   <fieldset>
@@ -457,6 +512,9 @@ function busy(on) {
   running = on;
   $('start').disabled = on;
   $('check').disabled = on;
+  $('extend').disabled = on;
+  // An extension inherits the earlier run's segmentation, which is in the
+  // form because choosing the directory filled it in.
   $('stop').disabled = !on || !$('segment_steps').value;
 }
 
@@ -504,6 +562,84 @@ listen('done', e => {
   if (e.payload.ok) { say('Finished.', 'ok'); log('done', 'k'); }
   else { say(e.payload.error, 'bad'); log(e.payload.error, 'e'); }
 });
+
+// --- extending -------------------------------------------------------------
+// Showing the earlier run's settings in the form is honest about what will
+// actually be used: the parameters come from that directory, not from
+// whatever happens to be typed here.
+$('ex_from').onchange = async () => {
+  const path = $('ex_from').value.trim();
+  if (!path) { $('ex_hint').textContent = 'a directory from a previous run'; return; }
+  try {
+    const s = await invoke('settings_at', { path });
+    fill(s);
+    versionsFor(s.state);
+    $('ex_hint').textContent = `${s.state} ${s.plan_type}, ${s.steps ?? '?'} steps — shown below`;
+    await showWarnings();
+  } catch (e) { $('ex_hint').textContent = String(e); }
+};
+
+$('extend').onclick = async () => {
+  const from = $('ex_from').value.trim(), out = $('ex_out').value.trim();
+  if (!from || !out) { say('Extending needs both directories.', 'warn'); return; }
+  if (!$('ex_plans').value) { say('Say how many more plans.', 'warn'); return; }
+  $('log').innerHTML = '';
+  say('');
+  try {
+    await invoke('start_extend', {
+      from, out,
+      plans: Number($('ex_plans').value),
+      steps: null,
+      segmentSteps: null,
+      cache: $('cache').value || null,
+    });
+    busy(true);
+  } catch (e) { say(String(e), 'bad'); }
+};
+
+// --- the cache -------------------------------------------------------------
+async function showCache() {
+  const rows = await invoke('cache_contents', { cache: $('cache').value || null });
+  const t = $('cacheTable');
+  t.innerHTML = rows.length
+    ? '<tr><th>state</th><th>version</th><th>size</th><th>adjacency</th><th></th></tr>'
+    : '';
+  for (const c of rows) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${c.state}</td><td>${c.version}</td>` +
+      `<td class="n">${(c.bytes / 1e6).toFixed(1)} MB</td>` +
+      `<td>${c.has_graph ? 'DRA graph' : 'shapes only'}</td><td></td>`;
+    const b = document.createElement('button');
+    b.textContent = 'Forget';
+    b.onclick = () => forget(c.state, c.version);
+    tr.lastElementChild.appendChild(b);
+    t.appendChild(tr);
+  }
+  const total = rows.reduce((a, c) => a + c.bytes, 0);
+  $('cacheTotal').textContent = rows.length
+    ? `${rows.length} package(s), ${(total / 1e6).toFixed(1)} MB`
+    : 'Nothing downloaded yet.';
+}
+
+async function forget(state, version, index = false) {
+  try {
+    const gone = await invoke('cache_forget', {
+      cache: $('cache').value || null, state: state ?? null,
+      version: version ?? null, index,
+    });
+    const freed = gone.reduce((a, c) => a + c.bytes, 0);
+    say(gone.length
+      ? `Removed ${gone.length} package(s), ${(freed / 1e6).toFixed(1)} MB.`
+      : (index ? 'Removed the index.' : 'Nothing matched.'), 'ok');
+    await showCache();
+    await loadStates();
+  } catch (e) { say(String(e), 'bad'); }
+}
+
+$('cacheRefresh').onclick = showCache;
+$('cacheForgetAll').onclick = () => forget(null, null);
+$('cacheForgetIndex').onclick = () => forget(null, null, true);
+$('cachePanel').addEventListener('toggle', e => { if (e.target.open) showCache(); });
 
 // --- wiring ----------------------------------------------------------------
 $('state').onchange = () => versionsFor($('state').value);

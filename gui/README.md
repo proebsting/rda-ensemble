@@ -67,6 +67,36 @@ The panel also lists anything that would stop someone else reproducing the
 run — no pinned DRA version, `threads` above 1, datasets left to `cycle`
 rather than named. Those are warnings, not errors: the run is still a run.
 
+## Extending an ensemble
+
+The **Extend an ensemble** panel carries an earlier run's chain on for
+longer. Point it at that run's directory, say where the longer one goes, and
+how many more plans.
+
+Its settings come from the earlier run's own directory, not from the form —
+extending continues one chain, and changing its parameters halfway would make
+it a different one. Choosing the directory fills the form in with what will
+actually be used, so what you see is what you get.
+
+If that run was segmented, the result is **byte-identical** to one run of the
+full length. If it was not, the chain is still continued — valid, since ReCom
+is Markov — but the window says it will not match. Either way the original
+directory is left alone.
+
+## What has been downloaded
+
+A collapsed panel under **Output**, because it is not part of building an
+ensemble and most of the time it does not matter. When it does: one directory
+per state *and* version, so pinning an older version never evicts a newer
+one, and a full sweep is about 780 MB. Forget one package, everything, or
+just the index of what DRA publishes.
+
+## Repeating someone else's run
+
+There is no separate button for this. **Load settings** takes their
+`settings.json` or their `manifest.json`, **Run** runs it — which is what the
+CLI's `replay` does.
+
 ## Stopping a run
 
 The **Stop** button needs somewhere to stop. rustrecom runs a chain to
@@ -85,5 +115,7 @@ is recorded in the settings file, so a reproduction keeps it.
   `tauri-plugin-dialog` is the obvious next step.
 - No chart of the scores. The window tells you the ensemble is written and
   whether it converged; reading it is still someone else's job.
+- No `fetch` button. Downloading happens when it is needed — reading a state's
+  datasets, or running — rather than as a step of its own.
 - No progress bar under `--chains` above 1, for the same reason the CLI has
   none: several chains report at once.

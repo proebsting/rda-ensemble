@@ -1002,9 +1002,14 @@ fn chain(
     summary.stopped = stopped;
     summary.segments = extend.map_or(0, |e| e.segment_base) + plan.len() as u64;
     if stopped {
+        // "scored" would read as the size of the ensemble, which for an
+        // extension it is not: the rows it was appended to are not counted
+        // here. The closing report gives the total.
         ev.status(&format!(
-            "  stopped early: {} steps taken, {} plans scored",
-            summary.steps, summary.scored
+            "  stopped early at step {}, having {} {} plans",
+            summary.steps,
+            if extend.is_some() { "added" } else { "scored" },
+            summary.scored
         ));
     } else if cli.chains > 1 {
         ev.status(&format!("chain {}: scored {} plans", index + 1, summary.scored));
