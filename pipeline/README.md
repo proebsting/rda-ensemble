@@ -443,7 +443,7 @@ them, in exactly the format the stage-by-stage `rdarust` CLI writes:
 | `data` | `precinct_data.jsonl` | population, votes and shapes per precinct |
 | `recom-graph` | `recom_graph.json` | the chain's dual graph, seed plan included |
 | `seed-plan` | `seed_plan.csv` | the starting plan, as `GEOID,District` |
-| `plans` | `plans.jsonl` | every scored plan, as geoid to district |
+| `plans` | `plans.jsonl` | the ensemble itself, as geoid to district |
 
 `--keep all` writes the lot. Each one costs a serialisation and nothing else:
 the value is already in memory, which is why keeping it is cheap and why the

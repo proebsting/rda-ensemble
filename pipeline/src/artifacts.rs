@@ -53,7 +53,7 @@ impl Artifact {
             Artifact::Data => "population, votes and shapes per precinct",
             Artifact::RecomGraph => "the chain's dual graph, seed plan included",
             Artifact::SeedPlan => "the starting plan the chain was given",
-            Artifact::Plans => "every scored plan, as geoid to district",
+            Artifact::Plans => "the ensemble itself, as geoid to district",
         }
     }
 

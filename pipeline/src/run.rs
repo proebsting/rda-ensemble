@@ -1199,7 +1199,9 @@ fn report_convergence(
     } else {
         ""
     };
-    ev.status(&format!("  {inside}scores.csv          one row per scored plan"));
+    ev.status(&format!(
+        "  {inside}scores.csv          one row per plan in the ensemble"
+    ));
     ev.status(&format!("  {inside}by_district.jsonl   the same plans, district by district"));
     ev.status("  manifest.json       what this run was, so it can be repeated");
     ev.status("  settings.json       the same decisions, to hand to someone else");

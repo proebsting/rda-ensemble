@@ -429,9 +429,12 @@ pub struct RunArgs {
     pub batch_size: usize,
 
     // ---- what to keep -----------------------------------------------------
-    /// Score every Nth chain step. A step that rejects its proposal leaves
-    /// the plan unchanged and is sampled again, which is what keeps the
-    /// ensemble's distribution right.
+    /// Keep every Nth chain step in the ensemble. The chain produces a plan
+    /// at every step; this decides which of them the ensemble is made of,
+    /// and every plan in it is scored.
+    ///
+    /// A step that rejects its proposal leaves the plan unchanged and is
+    /// sampled again, which is what keeps the ensemble's distribution right.
     #[arg(long, value_name = "N", default_value_t = 1, help_heading = "Output")]
     pub sample_every: u64,
 

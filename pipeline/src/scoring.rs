@@ -5,13 +5,20 @@
 //! partition to an rdarust plan and scores it there and then, rather than
 //! serialising it for a later pass. No ensemble is ever held in memory.
 //!
-//! # What "every Nth plan" means
+//! # What sampling decides
+//!
+//! The chain produces a plan at every step. Sampling decides which of those
+//! the *ensemble is made of* -- it is not a choice about which members of an
+//! ensemble to score, because every member is scored. `scores.csv` and
+//! `plans.jsonl` therefore hold the same plans: they are written together,
+//! here, as each one is selected.
 //!
 //! A ReCom chain self-loops: a step that rejects its proposal leaves the plan
 //! unchanged, and for the chain's stationary distribution to be right that
 //! repeat has to be counted again. So sampling is by *chain step*, not by
 //! distinct plan, and a self-looped step re-emits the plan that was already
-//! there. This mirrors rustrecom's own `--sample-interval` exactly, so
+//! there. An ensemble can hold the same plan more than once, and should.
+//! This mirrors rustrecom's own `--sample-interval` exactly, so
 //! `--sample-every N` here and `--sample-interval N` there select the same
 //! steps.
 //!

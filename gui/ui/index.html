@@ -344,13 +344,22 @@
       a new plan; a rejected one leaves the plan unchanged, and that repeat
       still counts, which is what makes the ensemble&rsquo;s distribution right.</p>
       <dl>
-        <dt>Plans / steps</dt><dd>Ask for plans and the steps are worked out:
-          10,000 plans sampled every 200 is two million steps. Giving steps
-          where you meant plans quietly gives you a two-hundredth of the
-          ensemble.</dd>
-        <dt>Sample every</dt><dd>Consecutive plans resemble each other, so
-          sampling every Nth gives a more independent set. The effective sample
-          size reported at the end says whether N was large enough.</dd>
+        <dt>Ensemble size / chain steps</dt><dd>Ask for a size and the steps
+          are worked out: 10,000 plans keeping one every 200 is two million
+          steps. Giving steps where you meant size quietly gives you a
+          two-hundredth of the ensemble.</dd>
+        <dt>Keep one plan every</dt><dd>The chain produces a plan at every
+          step, and this decides which of them the ensemble is made of. It is
+          not a question of which plans get scored &mdash; every plan in the
+          ensemble is scored.
+          <p style="margin:7px 0 0">Consecutive plans resemble each other, so
+          keeping one in every N gives an ensemble whose members are more
+          nearly independent. The effective sample size reported at the end
+          says whether N was large enough.</p>
+          <p style="margin:7px 0 0">A rejected step leaves the plan unchanged
+          and is kept again, so an ensemble can hold the same plan more than
+          once. That is correct: dropping the repeats would distort the
+          distribution.</p></dd>
         <dt>Variant</dt><dd><code>cut-edges-ust</code> unless you have a reason.
           The region-aware ones prefer cuts that keep counties whole;
           <code>reversible</code> samples the intended distribution exactly but
