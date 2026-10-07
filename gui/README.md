@@ -170,9 +170,36 @@ tolerance is measured from, making the accepted range lopsided about the
 average that will occur anyway. It is reachable because every rustrecom
 parameter is, not because a run wants it.
 
-Hiding the segment size has a cost: Stop needs a boundary to stop at, so a run
-started with the defaults cannot be interrupted. The window says that beside
-the greyed button rather than leaving it to be discovered.
+### Stopping, and the segment size
+
+The window starts **steps between stopping points** at 5000, so Stop works
+without anyone going looking for it. The CLI keeps its own default of none:
+changing that would alter every ensemble it has ever produced.
+
+Five thousand is chosen for the *slowest* ordinary arrangement rather than the
+average, because how long a step takes depends on how many precincts a merged
+pair spans — so **fewer districts run slower, not faster**:
+
+| | steps/s | 5000 steps |
+|---|---|---|
+| Michigan, 4 districts | 1,176 | 4.3s |
+| Illinois, 17 districts | 1,712 | 2.9s |
+| Michigan, 13 districts | 3,425 | 1.5s |
+
+Chopping the chain is free. The same 50,000 steps took 42.0s in segments of
+5000 and 42.3s whole; a thousand segments of 50 took 14.7s against 14.6s
+unsegmented. So the only thing a smaller segment costs is the arithmetic.
+
+It is a fixed number rather than one timed on the machine, deliberately. The
+segment length changes which plans come out, so a measured value would make
+the same settings produce different ensembles on different computers. A
+constant travels with the settings file.
+
+Two caveats. On a machine slower than an M1 Pro these times scale up
+proportionally. And `reversible` is far slower per step than the figures
+above — slow enough that its rate depends on `--balance-ub` rather than on the
+state — so Stop will be correspondingly less responsive there. Lowering the
+segment size costs nothing if that matters.
 
 ### Input widths
 

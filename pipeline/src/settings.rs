@@ -29,6 +29,28 @@ use crate::{Adjacency, Chamber, KeepArg, RunArgs, Variant};
 /// incompletely. A new optional field does not need it.
 pub const VERSION: u32 = 1;
 
+/// Segment length a form starts with, so a run can always be stopped.
+///
+/// A chain can only be interrupted between segments, so a form that left this
+/// blank would hand people a Stop button that never worked. The command line
+/// keeps its own default of none: changing that would alter every ensemble
+/// ever produced by it.
+///
+/// Five thousand is chosen for the *slowest* configuration rather than the
+/// average. Throughput depends on how many precincts a merged pair spans,
+/// which is roughly twice the precincts per district -- so fewer districts
+/// run slower, not faster. Measured on an M1 Pro: Michigan at 4 districts
+/// manages about 1,200 steps a second, Illinois at 17 about 1,700, Michigan
+/// at 13 about 3,400. Five thousand steps is therefore four seconds at worst
+/// and usually less. Segmenting itself costs nothing measurable: the same
+/// fifty thousand steps took 42.0s chopped and 42.3s whole.
+///
+/// It is a fixed number rather than one derived from timing on purpose. The
+/// segment length changes which plans come out, so a value measured from the
+/// machine would make the same settings produce different ensembles on
+/// different computers. A constant travels with the settings file.
+pub const FORM_SEGMENT_STEPS: u64 = 5_000;
+
 /// A decision the run needs and has not been given.
 ///
 /// Reported rather than merely refused, so a form can say what is still
@@ -159,6 +181,8 @@ impl Settings {
                 s.elections = Vec::new();
                 s.plan_type = String::new();
                 s.variant = String::new();
+                // Not a clap default, and deliberately so: see the constant.
+                s.segment_steps = Some(FORM_SEGMENT_STEPS);
                 s
             }
             _ => unreachable!("that argv is a run"),
@@ -776,6 +800,9 @@ mod tests {
         assert!(s.state.is_empty());
         assert!(s.plan_type.is_empty(), "the chamber is nobody's default");
         assert!(s.variant.is_empty(), "nor is the variant");
+        // The one value a form supplies that the command line does not: a
+        // Stop button needs a boundary to stop at.
+        assert_eq!(s.segment_steps, Some(FORM_SEGMENT_STEPS));
         assert_eq!(s.cycle, None);
         assert_eq!(s.steps, None);
         assert!(s.elections.is_empty());

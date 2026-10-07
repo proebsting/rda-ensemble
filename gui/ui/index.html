@@ -362,9 +362,20 @@
         <dt>Chains</dt><dd>Independent runs from different starting plans. One
           chain cannot tell you whether it explored the whole space; four can,
           through R-hat. They run in parallel.</dd>
-        <dt>Segment steps</dt><dd>Runs the chain in pieces so it can be stopped
-          between them &mdash; without it, Stop has nowhere to act. It changes
-          which plans you get, and is recorded, so quote it with the seed.</dd>
+        <dt>Steps between stopping points</dt><dd>Runs the chain in pieces so
+          it can be stopped between them &mdash; emptied, Stop has nowhere to
+          act. It changes which plans you get, and is recorded, so quote it
+          with the seed.
+          <p style="margin:7px 0 0">The window starts it at 5000, which is
+          under five seconds of chain even in the slowest arrangement. How long
+          a step takes depends on how many precincts a merged pair spans, so
+          <em>fewer</em> districts run slower, not faster: Michigan at 4
+          districts manages about 1,200 steps a second against 3,400 at 13.
+          Chopping the chain costs nothing measurable.</p>
+          <p style="margin:7px 0 0">It is a fixed number rather than one timed
+          on your machine, because the segment length changes the ensemble and
+          a measured value would make the same settings give different results
+          on different computers.</p></dd>
         <dt>Random seed</dt><dd>Any number. The same seed and settings reproduce
           the ensemble exactly, so write it down.</dd>
         <dt>Centre the balance window on</dt><dd>Almost always leave this blank.
@@ -426,8 +437,9 @@
       <div class="grid">
         <label><span class="name">Steps between stopping points</span>
           <input type="number" id="segment_steps" class="n-wide" min="1" placeholder="one segment">
-          <span class="hint">blank by default, and then the run cannot be
-            stopped. Setting it changes which plans you get, so it is recorded
+          <span class="hint">5000 by default, which is a few seconds of chain:
+            Stop acts at the next boundary. Clearing it makes the run
+            uninterruptible. It changes which plans you get, so it is recorded
             alongside the seed</span></label>
         <label><span class="name">Worker threads</span>
           <input type="number" id="threads" min="1">
@@ -896,7 +908,8 @@ function busy(on) {
   const stoppable = !!$('segment_steps').value;
   $('stop').disabled = !on || !stoppable;
   $('stopWhy').textContent = stoppable ? ''
-    : 'to stop a run, set \u201csteps between stopping points\u201d under Advanced';
+    : 'this run cannot be stopped: \u201csteps between stopping points\u201d '
+      + 'under Advanced is empty';
   if (on) $('start').disabled = true; else refresh();
 }
 
@@ -918,7 +931,8 @@ $('start').onclick = async () => {
   $('log').innerHTML = '';
   say('');
   if (!$('segment_steps').value) {
-    log('No segment steps: this run cannot be stopped once it starts.', 'w');
+    log('Steps between stopping points is empty: this run cannot be stopped '
+        + 'once it starts.', 'w');
   }
   try {
     await invoke('start', {
