@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use rda_ensemble::datasets::{self, Dataset};
+use rda_ensemble::datasets::{self, Survey};
 use rda_ensemble::dra::{self, Cached, Listing};
 use rda_ensemble::events::{Events, Sink};
 use rda_ensemble::run::{self, Cancel};
@@ -67,6 +67,30 @@ fn cache_of(cache: Option<String>) -> Option<PathBuf> {
     cache.filter(|c| !c.trim().is_empty()).map(PathBuf::from)
 }
 
+/// Ask for a directory, and give back the path.
+///
+/// Driven from Rust rather than from the page: the plugin's JavaScript side
+/// comes from an npm package, and this app has no bundler. `None` means the
+/// chooser was dismissed, which is not an error.
+#[tauri::command]
+fn pick_folder(app: AppHandle, start: Option<String>) -> Option<String> {
+    use tauri_plugin_dialog::DialogExt;
+    let mut chooser = app.dialog().file();
+    if let Some(dir) = start.filter(|d| !d.trim().is_empty()) {
+        let dir = PathBuf::from(dir);
+        // An unwritten output directory does not exist yet; open its parent
+        // rather than silently ignoring where they were headed.
+        let at = if dir.is_dir() { Some(dir) } else { dir.parent().map(PathBuf::from) };
+        if let Some(at) = at.filter(|p| p.is_dir()) {
+            chooser = chooser.set_directory(at);
+        }
+    }
+    chooser
+        .blocking_pick_folder()
+        .and_then(|p| p.into_path().ok())
+        .map(|p| p.display().to_string())
+}
+
 /// Where packages are kept when the window does not say.
 #[tauri::command]
 fn default_cache() -> String {
@@ -81,7 +105,8 @@ fn states(cache: Option<String>) -> Result<Vec<Listing>, String> {
     dra::listings(&inventory, None).map_err(|e| format!("{e:#}"))
 }
 
-/// What a state's GeoJSON carries, for the dataset menus.
+/// What a state's GeoJSON carries, for the dataset menus: every dataset,
+/// and what each census year would choose.
 ///
 /// Downloads the package if it is not cached, which is why it reports
 /// through the sink: it can take a while the first time.
@@ -91,7 +116,7 @@ fn datasets(
     state: String,
     dra_version: Option<String>,
     cache: Option<String>,
-) -> Result<Vec<Dataset>, String> {
+) -> Result<Survey, String> {
     let ev: Sink = Arc::new(Forward {
         app,
         last_progress: Mutex::new(Instant::now()),
@@ -99,7 +124,7 @@ fn datasets(
     let cache = cache_of(cache).unwrap_or_else(dra::default_cache);
     let package = dra::resolve(&cache, &state, dra_version.as_deref(), &ev)
         .map_err(|e| format!("{e:#}"))?;
-    datasets::read(&package.geojson).map_err(|e| format!("{e:#}"))
+    datasets::survey(&package.geojson).map_err(|e| format!("{e:#}"))
 }
 
 /// Whether a state's data is already on disk, and what it would cost.
@@ -322,6 +347,7 @@ fn stop(app: AppHandle) -> Result<(), String> {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(App::default())
         .invoke_handler(tauri::generate_handler![
             default_cache,
@@ -337,6 +363,7 @@ fn main() {
             start_extend,
             settings_at,
             package_status,
+            pick_folder,
             cache_contents,
             cache_forget,
             stop,

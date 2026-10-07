@@ -108,6 +108,10 @@
     font-weight: 600;
   }
   .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  /* A path and its chooser read as one control. */
+  .path { display: flex; gap: 7px; }
+  .path input { flex: 1; min-width: 0; }
+  .path button { white-space: nowrap; padding: 7px 12px; }
   .small { padding: 3px 10px; font-size: 14px; }
 
   #bar {
@@ -145,6 +149,9 @@
     cursor: pointer; color: var(--accent); font-size: 14px; width: fit-content;
   }
   details.help summary:hover { text-decoration: underline; }
+  details.advanced { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }
+  details.advanced > summary { font-weight: 600; color: var(--ink); }
+  details.advanced .grid { margin-top: 14px; }
   details.help div {
     margin-top: 9px; padding: 11px 14px; font-size: 14px;
     background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
@@ -252,48 +259,60 @@
   <fieldset>
     <legend>Which population and election figures</legend>
     <details class="help"><summary>What a cycle is, and where these names come from</summary><div>
-      <p>A <b>cycle</b> is simply a <b>year</b>. Every dataset in a DRA file is
-      tagged with the year it describes, and choosing a cycle means &ldquo;use
-      the population, voting-age and citizen voting-age datasets for that
-      year&rdquo;. Which years exist is a property of the file, so the menu is
-      built from the file rather than from a fixed list.</p>
-      <p>You can name the three datasets individually instead. That is stricter,
-      and worth doing for work you want to reproduce: a cycle could resolve
-      differently if DRA republishes the state. Where a year has two equally
-      good candidates &mdash; 2020 has both a decennial count and an ACS
-      estimate &mdash; the cycle refuses to guess and asks you to pick.</p>
-      <p><b>Elections</b> are separate from the demographic datasets and are not
-      chosen by the cycle.</p>
-      <p>A <b>composite</b> is a single dataset that averages several real
-      contests &mdash; <code>E_16-20_COMP</code> is one election made from the
-      2016, 2018 and 2020 results, which smooths out the peculiarities of any
-      one year. Picking it scores that average.</p>
-      <p><b>Also score the elections inside a composite</b> adds each contest the
-      composite is made from, so you get the average <em>and</em> each year on
-      its own: more columns in <code>scores.csv</code>, and a way to see whether
-      a result holds across years or depends on one of them. It is off unless
-      you ask, and it does nothing at all unless the election you chose is a
-      composite. Which contests one contains is listed beside its name.</p>
+      <p>Three population figures are needed for every run: total population,
+      voting-age population, and citizen voting-age population. Those are what
+      population balance and the minority metrics are computed from.</p>
+      <p>A DRA file holds several of each, one per year, so you have to say
+      which. <b>Census year</b> is a shortcut: pick a year and the three menus
+      beside it fill in with that year&rsquo;s datasets. You can then change any
+      of them, and your choice wins. The years offered are the ones this file
+      actually carries.</p>
+      <p>Occasionally a year cannot choose on its own &mdash; 2020 has both a
+      decennial count and an ACS estimate of total population, and they are not
+      interchangeable. The year then says so and leaves the menus for you.</p>
+      <p><b>Elections are different in kind.</b> What gets scored is always a
+      <em>plan</em>. But the partisan scores &mdash; efficiency gap, declination,
+      seats bias, and the rest &mdash; cannot be computed from a plan alone: they
+      ask how a plan would have treated the parties, which needs real votes. An
+      election dataset supplies those votes.</p>
+      <p>So picking two elections does not score two things. It scores every
+      plan twice, once against each set of results, and you get two sets of
+      partisan columns &mdash; useful when a plan looks fair under one election
+      and not under another.</p>
+      <p>A <b>composite</b> is one dataset holding an average of several real
+      contests: <code>E_16-20_COMP</code> blends the 2016, 2018 and 2020 results
+      so that no single year&rsquo;s peculiarities dominate. The contests it
+      averages are listed beside its name.</p>
+      <p>Ticking <b>also judge plans by each election a composite is made
+      of</b> adds those underlying contests as bases of their own, so you get
+      the blend <em>and</em> each year separately &mdash; which shows whether a
+      finding holds across years or rests on one of them. It does nothing unless
+      what you picked is a composite.</p>
     </div></details>
     <p class="note" id="dsStatus">Choose a state first.</p>
     <div class="grid">
       <label id="w-cycle"><span class="name">Census year</span>
-        <select id="cycle" class="s-mid"></select>
-        <span class="hint">saved as <code>cycle</code>; picks the three
-          datasets below</span></label>
-      <label><span class="name">Total population</span><select id="census"></select></label>
-      <label><span class="name">Voting-age population</span><select id="vap"></select></label>
-      <label><span class="name">Citizen voting-age population</span><select id="cvap"></select></label>
-      <label id="w-elections"><span class="name">Elections to score</span>
+        <select id="cycle" class="s-short"></select>
+        <span class="hint" id="cycleSays">fills in the three menus beside
+          it</span></label>
+      <label><span class="name">Total population</span>
+        <select id="census"></select></label>
+      <label><span class="name">Voting-age population</span>
+        <select id="vap"></select></label>
+      <label><span class="name">Citizen voting-age population</span>
+        <select id="cvap"></select>
+        <span class="hint">change any of these and your choice wins</span></label>
+      <label id="w-elections"><span class="name">Election results to judge plans by</span>
         <select id="elections" multiple></select>
-        <span class="hint">several may be chosen</span></label>
+        <span class="hint">the partisan scores need votes. Each election you
+          pick is measured separately, giving its own set of columns</span></label>
       <label><span class="name">&nbsp;</span>
         <div class="checks">
           <label><input type="checkbox" id="expand_composites">
-            Also score the elections inside a composite</label>
+            Also judge plans by each election a composite is made of</label>
         </div>
-        <span class="hint">off by default. A composite averages several real
-          elections; this scores each of those too, as extra columns</span></label>
+        <span class="hint">off by default, and does nothing unless you picked a
+          composite</span></label>
     </div>
   </fieldset>
 
@@ -346,8 +365,16 @@
         <dt>Segment steps</dt><dd>Runs the chain in pieces so it can be stopped
           between them &mdash; without it, Stop has nowhere to act. It changes
           which plans you get, and is recorded, so quote it with the seed.</dd>
-        <dt>RNG seed</dt><dd>Any number. The same seed and settings reproduce
+        <dt>Random seed</dt><dd>Any number. The same seed and settings reproduce
           the ensemble exactly, so write it down.</dd>
+        <dt>Centre the balance window on</dt><dd>Almost always leave this blank.
+          Districts divide the whole state between them, so their average
+          population is <em>necessarily</em> the total divided by the number of
+          districts &mdash; nothing here can change that. What this does change
+          is the number the tolerance is measured from, so setting it to
+          anything else makes the accepted range lopsided about the average
+          that will actually occur. It is reachable because every rustrecom
+          parameter is, not because a run normally wants it.</dd>
       </dl>
       <p>These are conventions, not recommendations from rdapy: rdapy scores
       plans and does not generate them, so it has nothing to say about chain
@@ -387,25 +414,36 @@
       <label><span class="name">Independent chains</span>
         <input type="number" id="chains" min="1">
         <span class="hint">1 by default; 4 lets R-hat work</span></label>
-      <label><span class="name">Steps between stopping points</span>
-        <input type="number" id="segment_steps" class="n-wide" min="1" placeholder="one segment">
-        <span class="hint">blank is the default: one segment, so Stop has
-          nowhere to act</span></label>
       <label id="w-balance_ub"><span class="name">Balance bound</span>
         <input type="number" id="balance_ub" class="n-wide" min="0" placeholder="reversible only"></label>
       <label id="w-region_weights"><span class="name">Keep regions whole</span>
         <input type="text" id="region_weights" placeholder="COUNTY=1.0">
         <span class="hint">comma separated; region-aware variants only</span></label>
-      <label><span class="name">Ideal population per district</span>
-        <input type="number" id="target_pop" class="n-wide" min="1" placeholder="total / districts">
-        <span class="hint">blank is the default: total divided by districts</span></label>
-      <label><span class="name">Worker threads</span>
-        <input type="number" id="threads" min="1">
-        <span class="hint">1 by default; above 1 is not reproducible</span></label>
-      <label><span class="name">Steps per unit of threaded work</span>
-        <input type="number" id="batch_size" min="1">
-        <span class="hint">1 by default; only matters above one thread</span></label>
     </div>
+
+    <details class="advanced">
+      <summary>Advanced (uncommon)</summary>
+      <div class="grid">
+        <label><span class="name">Steps between stopping points</span>
+          <input type="number" id="segment_steps" class="n-wide" min="1" placeholder="one segment">
+          <span class="hint">blank by default, and then the run cannot be
+            stopped. Setting it changes which plans you get, so it is recorded
+            alongside the seed</span></label>
+        <label><span class="name">Worker threads</span>
+          <input type="number" id="threads" min="1">
+          <span class="hint">1 by default. Above 1 is faster but the run stops
+            being reproducible, even with the same seed</span></label>
+        <label><span class="name">Steps per unit of threaded work</span>
+          <input type="number" id="batch_size" min="1">
+          <span class="hint">1 by default; does nothing unless threads is above
+            1</span></label>
+        <label><span class="name">Centre the balance window on</span>
+          <input type="number" id="target_pop" class="n-wide" min="1" placeholder="total &divide; districts">
+          <span class="hint">leave blank. The average district is always
+            total &divide; districts whatever goes here; this only shifts which
+            sizes are accepted</span></label>
+      </div>
+    </details>
   </fieldset>
 
   <fieldset>
@@ -415,9 +453,14 @@
       row per plan), <code>by_district.jsonl</code>, <code>manifest.json</code>,
       <code>settings.json</code> and <code>diagnostics.json</code>. With several
       chains, the per-chain files move into <code>chain_1/</code> and so on.</p>
-      <p>The <b>package cache</b> is shared between every run and holds what has
-      been downloaded from DRA. Nothing a run produces goes there. Neither path
-      is saved in a settings file, because they differ between machines.</p>
+      <p>The second is a <b>cache</b>, not an output. It holds what has been
+      downloaded from Dave&rsquo;s Redistricting, one directory per state and
+      version, and is shared by every run: a state is fetched the first time it
+      is needed and reused thereafter. Nothing a run produces goes there, and
+      deleting it costs only the time to download again. The Downloads tab
+      shows what is in it.</p>
+      <p>Neither path is saved in a settings file, because they belong to your
+      machine rather than to the ensemble.</p>
       <p><b>Keep intermediates</b> writes out values that would otherwise just be
       passed from one stage to the next. <code>plans</code> is the one to think
       about: it is the ensemble itself, it is what lets the run be extended
@@ -425,12 +468,20 @@
     </div></details>
     <div class="grid">
       <label id="w-out"><span class="name">Where to write the results</span>
-        <input type="text" id="out" placeholder="/path/to/results">
-        <span class="hint">not saved in the settings file</span></label>
-      <label><span class="name">Where downloads are kept</span>
-        <input type="text" id="cache">
-        <span class="hint">the per-user default, shown so you can change
-          it; not saved in the settings file</span></label>
+        <span class="path">
+          <input type="text" id="out" placeholder="/path/to/results">
+          <button id="pickOut" type="button">Choose&hellip;</button>
+        </span>
+        <span class="hint">one directory per run. Not saved in the settings
+          file, since it is yours rather than the ensemble&rsquo;s</span></label>
+      <label><span class="name">Where downloads are cached</span>
+        <span class="path">
+          <input type="text" id="cache">
+          <button id="pickCache" type="button">Choose&hellip;</button>
+        </span>
+        <span class="hint">a cache, shared by every run: a state is downloaded
+          once and reused. Safe to delete &mdash; see the Downloads tab. Not
+          saved in the settings file</span></label>
     </div>
     <div style="margin-top:14px">
       <span class="name" style="font-weight:550">Also write intermediate files</span>
@@ -456,10 +507,16 @@
     </p>
     <div class="grid">
       <label><span class="name">Ensemble to extend</span>
-        <input type="text" id="ex_from" placeholder="/path/to/results">
+        <span class="path">
+          <input type="text" id="ex_from" placeholder="/path/to/results">
+          <button id="pickExFrom" type="button">Choose&hellip;</button>
+        </span>
         <span class="hint" id="ex_hint">a directory from a previous run</span></label>
       <label><span class="name">Where to write the longer ensemble</span>
-        <input type="text" id="ex_out" placeholder="/path/to/results-longer">
+        <span class="path">
+          <input type="text" id="ex_out" placeholder="/path/to/results-longer">
+          <button id="pickExOut" type="button">Choose&hellip;</button>
+        </span>
         <span class="hint">the original is left alone</span></label>
       <label><span class="name">How many more plans</span>
         <input type="number" id="ex_plans" class="n-wide" min="1" placeholder="how many more">
@@ -499,6 +556,7 @@
     <button id="check">Check settings</button>
     <button id="start" class="primary">Run</button>
     <button id="stop" disabled>Stop</button>
+    <span id="stopWhy" class="sub"></span>
     <div id="bar"><div></div></div>
     <span id="pct" class="sub"></span>
   </div>
@@ -722,12 +780,13 @@ async function loadDatasets() {
   if (!state) { say('Choose a state first.', 'warn'); return; }
   $('dsStatus').textContent = 'Reading datasets… (downloading if needed)';
   try {
-    const rows = await invoke('datasets', {
+    const survey = await invoke('datasets', {
       state, draVersion: $('dra_version').value || null, cache: $('cache').value || null,
     });
+    const rows = survey.datasets;
     const put = (id, kind) => {
       const keep = $(id).value;
-      $(id).innerHTML = '<option value="">from cycle</option>';
+      $(id).innerHTML = '<option value="">\u2014</option>';
       for (const d of rows.filter(d => d.kind === kind)) {
         $(id).add(new Option(`${d.name} — ${d.title}`, d.name));
       }
@@ -735,14 +794,13 @@ async function loadDatasets() {
     };
     put('census', 'census'); put('vap', 'vap'); put('cvap', 'cvap');
 
-    // Cycles are the years the demographic datasets carry -- a property of
-    // this file, not a list anyone could know in advance.
-    const years = [...new Set(rows.filter(d => d.kind !== 'election').map(d => d.year))]
-      .filter(y => y > 0).sort((a, b) => b - a);
+    // A year is a shortcut for three datasets, so the menu offers the years
+    // this file carries and `cycles` says what each one would choose.
+    cycles = survey.cycles;
     const keepYear = $('cycle').value;
-    $('cycle').innerHTML = '<option value="">name the three below instead</option>';
-    for (const y of years) $('cycle').add(new Option(y, y));
-    $('cycle').value = years.map(String).includes(keepYear) ? keepYear : '';
+    $('cycle').innerHTML = '<option value="">\u2014</option>';
+    for (const c of cycles) $('cycle').add(new Option(c.year, c.year));
+    $('cycle').value = cycles.some(c => String(c.year) === keepYear) ? keepYear : '';
 
     const chosen = new Set([...$('elections').selectedOptions].map(o => o.value));
     $('elections').innerHTML = '';
@@ -751,6 +809,7 @@ async function loadDatasets() {
       o.selected = chosen.has(d.name);
       $('elections').add(o);
     }
+    applyCycle();
     const n = k => rows.filter(d => d.kind === k).length;
     $('dsStatus').textContent =
       `${rows.length} datasets: ${n('census')} population, ${n('vap')} voting-age, ` +
@@ -760,6 +819,32 @@ async function loadDatasets() {
     $('dsStatus').textContent = String(e);
     say(String(e), 'bad');
   }
+}
+
+// Choosing a year fills the three menus with what that year picks. It is a
+// shortcut, not a mode: the menus stay editable afterwards, and whatever is
+// in them is what the run uses.
+let cycles = [];
+
+function applyCycle() {
+  const year = $('cycle').value;
+  const says = $('cycleSays');
+  if (!year) { says.textContent = 'fills in the three menus beside it'; return; }
+  const c = cycles.find(c => String(c.year) === year);
+  if (!c) { says.textContent = ''; return; }
+  if (c.problem) {
+    // Two equally good candidates; the library refuses to guess and so
+    // should the form.
+    says.textContent = c.problem.split('\n')[0];
+    return;
+  }
+  for (const [id, name] of [['census', c.census], ['vap', c.vap], ['cvap', c.cvap]]) {
+    if (name && ![...$(id).options].some(o => o.value === name)) {
+      $(id).add(new Option(name, name));
+    }
+    $(id).value = name ?? '';
+  }
+  says.textContent = `chose ${c.census}, ${c.vap} and ${c.cvap}`;
 }
 
 // --- settings file ---------------------------------------------------------
@@ -806,9 +891,18 @@ function busy(on) {
   running = on;
   $('check').disabled = on;
   $('extend').disabled = on;
-  $('stop').disabled = !on || !$('segment_steps').value;
+  // Stop needs a boundary to stop at, which is what segment steps creates.
+  // Greying the button without saying why is how a control becomes folklore.
+  const stoppable = !!$('segment_steps').value;
+  $('stop').disabled = !on || !stoppable;
+  $('stopWhy').textContent = stoppable ? ''
+    : 'to stop a run, set \u201csteps between stopping points\u201d under Advanced';
   if (on) $('start').disabled = true; else refresh();
 }
+
+// Keep that explanation current as the field is edited, not only when a run
+// starts.
+document.addEventListener('DOMContentLoaded', () => {});
 
 $('check').onclick = async () => {
   say('Checking…');
@@ -884,6 +978,26 @@ $('extend').onclick = async () => {
   } catch (e) { say(String(e), 'bad'); }
 };
 
+// --- choosing directories --------------------------------------------------
+// The chooser is driven from Rust: the dialog plugin's JavaScript side comes
+// from an npm package and this app has no bundler.
+async function choose(field, after) {
+  try {
+    const picked = await invoke('pick_folder', { start: $(field).value || null });
+    if (picked === null || picked === undefined) return;   // dismissed
+    $(field).value = picked;
+    if (after) await after();
+  } catch (e) { say(String(e), 'bad'); }
+}
+
+$('pickOut').onclick = () => choose('out', refresh);
+$('pickCache').onclick = () => choose('cache', async () => {
+  await loadStates();
+  await datasetsFor($('state').value);
+});
+$('pickExFrom').onclick = () => choose('ex_from', () => $('ex_from').onchange());
+$('pickExOut').onclick = () => choose('ex_out');
+
 // --- the cache -------------------------------------------------------------
 async function showCache() {
   const rows = await invoke('cache_contents', { cache: $('cache').value || null });
@@ -947,6 +1061,8 @@ $('state').onchange = async () => {
   await datasetsFor($('state').value);
 };
 $('dra_version').addEventListener('change', () => datasetsFor($('state').value));
+$('cycle').addEventListener('change', () => { applyCycle(); refresh(); });
+$('segment_steps').addEventListener('input', () => busy(running));
 for (const [k] of FIELDS) {
   $(k).addEventListener('change', refresh);
   $(k).addEventListener('input', refresh);

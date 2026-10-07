@@ -74,16 +74,83 @@ pub struct Dataset {
     pub members: Vec<String>,
 }
 
+/// What one census year would choose, or why it cannot.
+///
+/// A year is a shortcut for three datasets. Showing which three removes the
+/// mystery from it -- and where a year has two equally good candidates, says
+/// so instead of leaving a menu that silently does nothing.
+#[derive(serde::Serialize)]
+pub struct CycleChoice {
+    pub year: i64,
+    pub census: Option<String>,
+    pub vap: Option<String>,
+    pub cvap: Option<String>,
+    /// Why this year cannot pick on its own, if it cannot.
+    pub problem: Option<String>,
+}
+
+/// Everything a front end needs from one GeoJSON, read once.
+#[derive(serde::Serialize)]
+pub struct Survey {
+    pub datasets: Vec<Dataset>,
+    /// Every demographic year the file carries, newest first.
+    pub cycles: Vec<CycleChoice>,
+}
+
+/// Read the datasets, and work out what each year would choose.
+///
+/// One pass over the file, because it is tens of megabytes and a form that
+/// re-read it per keystroke would be unusable.
+pub fn survey(path: &Path) -> Result<Survey> {
+    let doc = parse(path)?;
+    let datasets = from_doc(&doc, path)?;
+
+    let mut years: Vec<i64> = datasets
+        .iter()
+        .filter(|d| d.kind != Kind::Election && d.year > 0)
+        .map(|d| d.year)
+        .collect();
+    years.sort_unstable_by(|a, b| b.cmp(a));
+    years.dedup();
+
+    let cycles = years
+        .into_iter()
+        .map(|year| match for_cycle(&doc, year, [None, None, None]) {
+            Ok(c) => CycleChoice {
+                year,
+                census: Some(c.census),
+                vap: Some(c.vap),
+                cvap: Some(c.cvap),
+                problem: None,
+            },
+            Err(e) => CycleChoice {
+                year,
+                census: None,
+                vap: None,
+                cvap: None,
+                problem: Some(format!("{e}")),
+            },
+        })
+        .collect();
+    Ok(Survey { datasets, cycles })
+}
+
+fn parse(path: &Path) -> Result<Value> {
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("reading {}", path.display()))?;
+    serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))
+}
+
 /// Every dataset in a GeoJSON, grouped by the option it belongs to and
 /// newest first within a group.
 ///
 /// Returns them rather than printing: this is what fills a list of choices,
 /// whether that is [`render`] writing lines or a caller building a menu.
 pub fn read(path: &Path) -> Result<Vec<Dataset>> {
-    let text = std::fs::read_to_string(path)
-        .with_context(|| format!("reading {}", path.display()))?;
-    let doc: Value = serde_json::from_str(&text)
-        .with_context(|| format!("parsing {}", path.display()))?;
+    from_doc(&parse(path)?, path)
+}
+
+fn from_doc(doc: &Value, path: &Path) -> Result<Vec<Dataset>> {
     let Some(datasets) = doc.get("datasets").and_then(|d| d.as_object()) else {
         bail!("{} has no datasets object; is this a DRA export?", path.display());
     };

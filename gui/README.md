@@ -66,19 +66,41 @@ MI v06 has not been downloaded yet (3.8 MB).  [Download and read its datasets]
 Nobody should have to work out that a menu is empty because a button has not
 been pressed.
 
-### Cycles
+### Census year
 
-A **cycle** is a year. Every dataset in a DRA file is tagged with the year it
-describes, and choosing a cycle means "use the population, voting-age and
-citizen voting-age datasets for that year". Which years exist is a property of
-the file, so it is a menu built from the file rather than a number you have to
-know — `for_cycle` was already listing the available years in its error
-message, which was the clue that the UI should have been offering them all
-along.
+A cycle is a year, and a year is a shortcut for three datasets: total
+population, voting-age, and citizen voting-age. So the year **fills the three
+menus in**, and says which it chose:
 
-Naming the three datasets individually is stricter and better for work you
-want to reproduce, since a cycle could resolve differently if DRA republishes
-the state.
+```
+Census year  [2020 ▾]   chose T_20_CENS, V_20_VAP and V_20_CVAP
+```
+
+It is not an alternative to those menus, and an earlier version that presented
+it as one — with an option reading "name the three below instead" sitting in a
+list of years — was indefensible. The menus stay editable afterwards and
+whatever is in them is what runs.
+
+Where a year cannot choose on its own, it says so instead: 2020 carries both a
+decennial count and an ACS estimate of total population, and they are not
+interchangeable. `datasets::survey` resolves every year in one pass over the
+file, so the window never re-reads tens of megabytes to answer this.
+
+### Elections
+
+What gets scored is always a **plan**. But the partisan metrics — efficiency
+gap, declination, seats bias — cannot be computed from a plan alone: they ask
+how it would have treated the parties, which needs real votes. An election
+dataset supplies those votes, which is why the label is *Election results to
+judge plans by* and not, as it once was, "elections to score".
+
+Picking two elections does not score two things. It scores every plan twice,
+once against each set of results.
+
+A **composite** is one dataset holding an average of several contests;
+`E_16-20_COMP` blends 2016, 2018 and 2020. Ticking *also judge plans by each
+election a composite is made of* adds those contests as bases of their own, so
+a finding can be checked against each year rather than only the blend.
 
 ### Defaults, and what has none
 
@@ -122,6 +144,35 @@ gives the key: *saved as `cycle`*, *saved as `plans`*. Someone reading a
 
 The "still needed" tally quotes the same words, read out of the label itself,
 so renaming a field renames it in both places.
+
+### Choosing directories
+
+**Choose…** beside the two path fields opens a native folder chooser, starting
+from wherever the field already points — or its parent, when an output
+directory has not been created yet. It is driven from Rust, because the dialog
+plugin's JavaScript side ships as an npm package and this app has no bundler.
+
+The second path is a **cache**, and the label says so: one directory per state
+and version, shared by every run, a state fetched once and reused. Deleting it
+costs only the time to download again, and the Downloads tab shows what is in
+it.
+
+### Advanced
+
+Four settings sit under a collapsed *Advanced (uncommon)*: steps between
+stopping points, worker threads, steps per unit of threaded work, and the
+centre of the balance window.
+
+That last one deserves its place. Districts divide the whole state between
+them, so their average population is *necessarily* total ÷ districts and
+nothing can change it — what the setting actually moves is the number the
+tolerance is measured from, making the accepted range lopsided about the
+average that will occur anyway. It is reachable because every rustrecom
+parameter is, not because a run wants it.
+
+Hiding the segment size has a cost: Stop needs a boundary to stop at, so a run
+started with the defaults cannot be interrupted. The window says that beside
+the greyed button rather than leaving it to be discovered.
 
 ### Input widths
 
