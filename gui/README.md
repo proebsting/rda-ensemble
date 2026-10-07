@@ -80,6 +80,31 @@ Naming the three datasets individually is stricter and better for work you
 want to reproduce, since a cycle could resolve differently if DRA republishes
 the state.
 
+### Defaults, and what has none
+
+Where a setting has a real default the label says so — `auto (default)`,
+`1 by default`, `blank is the default: the chamber's real count`. Five options
+genuinely default in the CLI (`adjacency`, `chains`, `threads`, `batch_size`,
+`sample_every`); the rest are "blank means X" behaviours, marked the same way.
+
+Writing those in turned up an inconsistency. The window used to pre-select a
+**chamber**, which the CLI requires and refuses to guess. Congressional and
+legislative plans differ in almost everything, so nothing should pick one for
+you: the menu now starts empty and the chamber appears in "still needed" until
+it is set.
+
+**Variant** keeps its pre-selection. `cut-edges-ust` is what essentially every
+published ensemble uses, and the option says "the usual choice" rather than
+"(default)", which is the honest description of a pre-selection the command
+line would not make. If that feels like the same inconsistency, it can go the
+same way as the chamber.
+
+### Input widths
+
+A box is sized to what belongs in it — a four-digit seed does not get the same
+width as a filesystem path. Sizes are in `ch`, so they track the font rather
+than fighting it.
+
 ### Explanations
 
 Each pane has a *What these mean* disclosure, collapsed by default: what a

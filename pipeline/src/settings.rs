@@ -151,10 +151,13 @@ impl Settings {
             crate::Command::Run(args) => {
                 let mut s = Settings::from_args(&args);
                 // Placeholders, not choices: blank them so a form cannot
-                // present them as if they had been decided.
+                // present them as if they had been decided. The chamber goes
+                // too -- congress is only what the argv above had to say to
+                // parse, not a default anyone chose.
                 s.cycle = None;
                 s.steps = None;
                 s.elections = Vec::new();
+                s.plan_type = String::new();
                 s
             }
             _ => unreachable!("that argv is a run"),
@@ -213,6 +216,11 @@ impl Settings {
         let mut out = Vec::new();
         if self.state.trim().is_empty() {
             out.push(want("state", "Which state the plan is for."));
+        }
+        // Congressional, upper or lower is a real choice with no obviously
+        // right answer, so nothing should pick it for you.
+        if !["congress", "upper", "lower"].contains(&self.plan_type.as_str()) {
+            out.push(want("plan_type", "Which chamber the plan is for."));
         }
         if self.cycle.is_none()
             && (self.census.is_none() || self.vap.is_none() || self.cvap.is_none())
@@ -667,7 +675,8 @@ mod tests {
         let fields: Vec<&str> = wanted.iter().map(|m| m.field.as_str()).collect();
         assert_eq!(
             fields,
-            ["state", "cycle", "elections", "seed_tolerance", "plans", "tolerance"],
+            ["state", "plan_type", "cycle", "elections", "seed_tolerance", "plans",
+             "tolerance"],
             "a blank form should want exactly these"
         );
         // Nothing is wanted once they are given.
@@ -728,10 +737,14 @@ mod tests {
         assert_eq!(s.batch_size, 1);
         assert_eq!(s.sample_every, 1);
         assert_eq!(s.adjacency, "auto");
+        // cut-edges-ust is the one pre-selection the form keeps: it is what
+        // essentially every published ensemble uses, and the help says so
+        // rather than calling it a default.
         assert_eq!(s.variant, "cut-edges-ust");
         // And the placeholders are blank rather than pretending to be
         // decisions.
         assert!(s.state.is_empty());
+        assert!(s.plan_type.is_empty(), "the chamber is nobody's default");
         assert_eq!(s.cycle, None);
         assert_eq!(s.steps, None);
         assert!(s.elections.is_empty());
