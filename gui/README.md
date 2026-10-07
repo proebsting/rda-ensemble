@@ -105,9 +105,16 @@ What is left pre-selected is only what the CLI itself defaults: `adjacency`,
 ### Labels
 
 A label asks a question rather than naming a flag. "Plans" became **Ensemble
-size**, "Cycle" became **Census year**, "Adjacency" became **Where precinct
-borders come from**, "Sample every" became **Keep one plan every** — with the
-unit moved into the hint beside it, so the sentence finishes.
+size**, "Cycle" became **Census year**, "Sample every" became **Keep one plan
+every** — with the unit moved into the hint beside it, so the sentence
+finishes.
+
+"Adjacency" became **Which precincts count as neighbours**, which took two
+goes. "Where precinct borders come from" was plainer but wrong: DRA's graph
+joins precincts across water, where there is no shared border at all, and that
+is precisely why Alaska runs with DRA's graph and comes apart into
+disconnected pieces without it. A label that promised borders described the
+option that fails.
 
 Where a rename moves far from what the settings file calls the field, the hint
 gives the key: *saved as `cycle`*, *saved as `plans`*. Someone reading a

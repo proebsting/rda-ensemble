@@ -203,10 +203,18 @@
           corrected. Leaving this blank uses whatever is newest, which means a
           run repeated next year may not match. Pin a version for anything you
           intend to reproduce.</dd>
-        <dt>Adjacency</dt><dd>Which precincts border which &mdash; the chain can
-          only move between neighbours. DRA ships a graph; the alternative is
-          deriving one from the precinct shapes. They disagree where water
-          crossings are involved, and Alaska only works with DRA&rsquo;s.</dd>
+        <dt>Which precincts count as neighbours</dt><dd>The chain works by
+          merging two neighbouring districts and splitting them again, so this
+          decides where it can move at all.
+          <p style="margin:7px 0 0">It is not quite the same question as which
+          precincts share a border. DRA&rsquo;s published graph also joins
+          precincts across water, which sharing a border would not. That is why
+          Alaska works only with DRA&rsquo;s: worked out from the shapes alone
+          its graph comes apart into disconnected pieces, and no chain can
+          run.</p>
+          <p style="margin:7px 0 0"><code>auto</code> uses DRA&rsquo;s when there
+          is one and reports any disagreement with the shapes;
+          <code>geometry</code> ignores it.</p></dd>
         <dt>Districts</dt><dd>Blank draws the number the chamber actually has.
           Set it only to ask a deliberate what-if.</dd>
       </dl>
@@ -218,12 +226,14 @@
       <label><span class="name">Which published version</span>
         <select id="dra_version" class="s-short"></select>
         <span class="hint">newest is the default; pin one to reproduce</span></label>
-      <label><span class="name">Where precinct borders come from</span>
+      <label><span class="name">Which precincts count as neighbours</span>
         <select id="adjacency" class="s-mid">
           <option value="auto">auto &mdash; DRA&rsquo;s graph if present (default)</option>
           <option value="dra">dra &mdash; require the published graph</option>
-          <option value="geometry">geometry &mdash; derive from shapes</option>
-        </select></label>
+          <option value="geometry">geometry &mdash; work it out from the shapes</option>
+        </select>
+        <span class="hint">saved as <code>adjacency</code>; the chain can only
+          move between neighbours</span></label>
       <label id="w-plan_type"><span class="name">Which chamber the plan is for</span>
         <select id="plan_type" class="s-short">
           <option value=""></option>
