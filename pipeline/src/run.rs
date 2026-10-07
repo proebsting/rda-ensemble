@@ -893,17 +893,26 @@ fn chain(
     // An extension continues the files it was handed; a fresh run starts
     // them. Opening for append on a fresh run would silently double an
     // ensemble if --out happened to hold one already.
-    let open = |path: std::path::PathBuf| -> Result<File> {
-        let f = match extend {
-            Some(_) => std::fs::OpenOptions::new().append(true).open(&path),
-            None => File::create(&path),
-        };
-        f.with_context(|| format!("opening {}", path.display()))
+    //
+    // These are opened once for the whole run and written through for every
+    // segment, so a compressor wrapped here spans the chain rather than one
+    // piece of it. The ensemble goes out compressed as it is produced; the
+    // scores and the per-district figures stay plain, being what people load
+    // into R or Python.
+    let appending = extend.is_some();
+    let open = |path: std::path::PathBuf| -> Result<Box<dyn Write + Send>> {
+        let f = if appending {
+            std::fs::OpenOptions::new().append(true).open(&path)
+        } else {
+            File::create(&path)
+        }
+        .with_context(|| format!("opening {}", path.display()))?;
+        Ok(Box::new(std::io::BufWriter::new(f)))
     };
     let scores = open(dir.join("scores.csv"))?;
     let by_district = open(dir.join("by_district.jsonl"))?;
     let plans = if artifacts.wants(Artifact::Plans) {
-        Some(open(artifacts.path(Artifact::Plans))?)
+        Some(crate::squeeze::writer(&artifacts.path(Artifact::Plans), appending)?)
     } else {
         None
     };
@@ -1039,6 +1048,11 @@ fn compress_kept(
     for dir in dirs {
         for what in Artifact::ALL {
             if !artifacts.wants(what) {
+                continue;
+            }
+            // The plans were written through a compressor as the chain
+            // produced them, so there is nothing left to do for those.
+            if what == Artifact::Plans {
                 continue;
             }
             let path = dir.join(what.file_name());

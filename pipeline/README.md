@@ -594,6 +594,17 @@ files read with nothing installed; 7-Zip opens them on Windows. Brotli needs a
 implies costs nothing here: rustrecom already depends on `binary-ensemble`,
 which depends on `xz2`.
 
+The ensemble is compressed **as it is written**, not afterwards: the chain
+opens its output once and writes through it for every segment, so the
+compressor spans the whole run. Nothing large is ever on disk uncompressed.
+The smaller intermediates are compressed when the run ends, which is simpler
+and costs nothing at their size.
+
+Extending appends a *second* xz stream rather than trying to resume the first,
+which is not possible. xz defines a file as a sequence of streams, so the
+result is an ordinary `.xz` that `xz(1)`, Python's `lzma` and this tool all
+read as one file.
+
 Reading is transparent and accepts gzip too, so `extend` continues happily
 from an ensemble someone recompressed by hand. The format is decided by the
 bytes, not the file name.

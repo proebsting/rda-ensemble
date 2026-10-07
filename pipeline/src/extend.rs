@@ -366,13 +366,18 @@ fn copy_results(from: &Path, out: &Path, through: u64) -> Result<()> {
             continue;
         }
         let reader = crate::squeeze::open(&src)?;
-        // Written back out plain: the run appends to these, and the final
-        // pass compresses them again.
+        // Written back out the way the run will carry on writing it, or the
+        // two end up in different files and the copy is orphaned. The plans
+        // stream through a compressor; the rest stay plain.
         let dest = out.join(name);
-        let mut writer = std::io::BufWriter::new(
-            std::fs::File::create(&dest)
-                .with_context(|| format!("creating {}", dest.display()))?,
-        );
+        let mut writer: Box<dyn std::io::Write + Send> = if name == "plans.jsonl" {
+            crate::squeeze::writer(&dest, false)?
+        } else {
+            Box::new(std::io::BufWriter::new(
+                std::fs::File::create(&dest)
+                    .with_context(|| format!("creating {}", dest.display()))?,
+            ))
+        };
         let csv = name.ends_with(".csv");
         for (n, line) in reader.lines().enumerate() {
             let line = line?;
@@ -404,6 +409,7 @@ fn copy_results(from: &Path, out: &Path, through: u64) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Read as _;
 
     fn scratch(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("rda-extend-{name}-{}", std::process::id()));
@@ -487,7 +493,15 @@ mod tests {
         assert!(!csv.contains("000290"), "later rows go: {csv:?}");
         assert!(csv.ends_with("\r\n"), "CRLF, so appending does not mix endings");
 
-        let plans = std::fs::read_to_string(dst.join("plans.jsonl")).unwrap();
+        // The plans are written through a compressor, so they come back
+        // under a name with .xz on it and have to be read as one.
+        assert!(dst.join("plans.jsonl.xz").exists(), "the copy is compressed");
+        assert!(!dst.join("plans.jsonl").exists(), "and not also left plain");
+        let mut plans = String::new();
+        crate::squeeze::open(&dst.join("plans.jsonl"))
+            .expect("opens")
+            .read_to_string(&mut plans)
+            .unwrap();
         assert_eq!(plans.lines().count(), 3);
         assert!(!plans.contains("000290"));
         let _ = std::fs::remove_dir_all(&src);

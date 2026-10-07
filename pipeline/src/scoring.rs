@@ -33,8 +33,7 @@
 //! plan the previous segment ended on.
 
 use std::collections::BTreeMap;
-use std::fs::File;
-use std::io::{BufWriter, Write};
+use std::io::Write;
 use std::sync::{Arc, Mutex};
 
 use rdarust_core::aggregate::{Aggregates, Mode};
@@ -90,9 +89,9 @@ pub struct ChainState {
     /// keeps it from reallocating every step.
     aggs: Aggregates,
 
-    csv: ScoresCsv<BufWriter<File>>,
-    by_district: BufWriter<File>,
-    plans: Option<BufWriter<File>>,
+    csv: ScoresCsv<Box<dyn Write + Send>>,
+    by_district: Box<dyn Write + Send>,
+    plans: Option<Box<dyn Write + Send>>,
 
     /// The plan the chain is sitting on, in rustrecom's node order.
     previous: Vec<u32>,
@@ -120,22 +119,21 @@ impl ChainState {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: &Context,
-        scores: File,
-        by_district: File,
-        plans: Option<File>,
+        scores: Box<dyn Write + Send>,
+        by_district: Box<dyn Write + Send>,
+        plans: Option<Box<dyn Write + Send>>,
         events: crate::events::Sink,
         total: u64,
         resume_at: Option<u64>,
     ) -> ChainState {
-        let writer = BufWriter::new(scores);
         ChainState {
             aggs: Aggregates::new(ctx),
             csv: match resume_at {
-                Some(_) => ScoresCsv::appending(writer),
-                None => ScoresCsv::new(writer),
+                Some(_) => ScoresCsv::appending(scores),
+                None => ScoresCsv::new(scores),
             },
-            by_district: BufWriter::new(by_district),
-            plans: plans.map(BufWriter::new),
+            by_district,
+            plans,
             previous: Vec::new(),
             last_step: resume_at.unwrap_or(0),
             started: resume_at.is_some(),

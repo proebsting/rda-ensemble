@@ -31,13 +31,16 @@
 //! original size.
 //!
 //! Reading accepts gzip as well, since someone may well have recompressed a
-//! file by hand.
+//! file by hand, and uses the multi-stream decoder throughout: a file written
+//! across an extension holds two streams, and the single-stream decoder calls
+//! that a corrupt file rather than reading on.
 
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result};
+use xz2::write::XzEncoder;
 
 /// Compression preset. Six is xz's own default; nine took the same time here
 /// and saved 0.001% of the original, which is not worth being different from
@@ -47,7 +50,25 @@ const PRESET: u32 = 6;
 /// What this writes, and what it recognises on the way back in.
 const SUFFIX: &str = ".xz";
 
-/// Compress `path` in place, leaving `path.br` and removing the original.
+/// A writer that compresses as it goes, at `path` plus `.xz`.
+///
+/// `append` continues an existing file by starting a second xz stream in it
+/// rather than trying to resume the first, which is not possible. xz defines
+/// a file as a sequence of streams, so the result is an ordinary `.xz` that
+/// `xz(1)`, Python's `lzma` and [`open`] below all read as one. It costs a
+/// little compression, since the second stream starts with an empty window.
+pub fn writer(path: &Path, append: bool) -> Result<Box<dyn Write + Send>> {
+    let path = PathBuf::from(format!("{}{SUFFIX}", path.display()));
+    let file = if append {
+        File::options().append(true).create(true).open(&path)
+    } else {
+        File::create(&path)
+    }
+    .with_context(|| format!("opening {}", path.display()))?;
+    Ok(Box::new(XzEncoder::new(std::io::BufWriter::new(file), PRESET)))
+}
+
+/// Compress `path` in place, leaving `path.xz` and removing the original.
 ///
 /// Returns where it ended up. A file that is already compressed is left
 /// alone, so running this twice is harmless.
@@ -62,8 +83,7 @@ pub fn compress(path: &Path) -> Result<PathBuf> {
         );
         let out = File::create(&out_path)
             .with_context(|| format!("creating {}", out_path.display()))?;
-        let mut writer =
-            xz2::write::XzEncoder::new(std::io::BufWriter::new(out), PRESET);
+        let mut writer = XzEncoder::new(std::io::BufWriter::new(out), PRESET);
         std::io::copy(&mut input, &mut writer)
             .with_context(|| format!("compressing {}", path.display()))?;
         writer.finish()?.flush()?;
@@ -98,8 +118,14 @@ pub fn open(path: &Path) -> Result<Box<dyn BufRead>> {
     );
 
     // xz: FD 37 7A 58 5A 00. gzip: 1F 8B.
+    //
+    // The multi decoder, not the plain one: a file written across an
+    // extension holds two streams, and the plain decoder calls that a
+    // corrupt stream rather than reading on.
     if head.starts_with(&[0xFD, b'7', b'z', b'X', b'Z', 0x00]) {
-        return Ok(Box::new(BufReader::new(xz2::read::XzDecoder::new(whole))));
+        return Ok(Box::new(BufReader::new(
+            xz2::read::XzDecoder::new_multi_decoder(whole),
+        )));
     }
     if head.starts_with(&[0x1F, 0x8B]) {
         return Ok(Box::new(BufReader::new(flate2::read::GzDecoder::new(whole))));
