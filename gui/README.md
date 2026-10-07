@@ -99,6 +99,20 @@ published ensemble uses, and the option says "the usual choice" rather than
 line would not make. If that feels like the same inconsistency, it can go the
 same way as the chamber.
 
+### Labels
+
+A label asks a question rather than naming a flag. "Plans" became **Ensemble
+size**, "Cycle" became **Census year**, "Adjacency" became **Where precinct
+borders come from**, "Sample every" became **Keep one plan every** — with the
+unit moved into the hint beside it, so the sentence finishes.
+
+Where a rename moves far from what the settings file calls the field, the hint
+gives the key: *saved as `cycle`*, *saved as `plans`*. Someone reading a
+`settings.json` can still find their way back.
+
+The "still needed" tally quotes the same words, read out of the label itself,
+so renaming a field renames it in both places.
+
 ### Input widths
 
 A box is sized to what belongs in it — a four-digit seed does not get the same

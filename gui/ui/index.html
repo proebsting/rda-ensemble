@@ -193,7 +193,7 @@
   </fieldset>
 
   <fieldset>
-    <legend>Data</legend>
+    <legend>Which state, and whose data</legend>
     <details class="help"><summary>What these mean</summary><div>
       <dl>
         <dt>State</dt><dd>Chooses which of Dave&rsquo;s Redistricting packages to
@@ -215,16 +215,16 @@
       <label id="w-state"><span class="name">State</span>
         <select id="state" class="s-short"></select>
         <span class="hint" id="stateHint">from DRA&rsquo;s index</span></label>
-      <label><span class="name">DRA version</span>
+      <label><span class="name">Which published version</span>
         <select id="dra_version" class="s-short"></select>
         <span class="hint">newest is the default; pin one to reproduce</span></label>
-      <label><span class="name">Adjacency</span>
+      <label><span class="name">Where precinct borders come from</span>
         <select id="adjacency" class="s-mid">
           <option value="auto">auto &mdash; DRA&rsquo;s graph if present (default)</option>
           <option value="dra">dra &mdash; require the published graph</option>
           <option value="geometry">geometry &mdash; derive from shapes</option>
         </select></label>
-      <label id="w-plan_type"><span class="name">Chamber</span>
+      <label id="w-plan_type"><span class="name">Which chamber the plan is for</span>
         <select id="plan_type" class="s-short">
           <option value=""></option>
           <option value="congress">congress</option>
@@ -233,14 +233,14 @@
         </select>
         <span class="hint">no default: congressional and legislative plans
           differ in almost everything</span></label>
-      <label><span class="name">Districts</span>
+      <label><span class="name">Number of districts</span>
         <input type="number" id="districts" min="2" placeholder="statutory">
         <span class="hint">blank is the default: the chamber&rsquo;s real count</span></label>
     </div>
   </fieldset>
 
   <fieldset>
-    <legend>Datasets</legend>
+    <legend>Which population and election figures</legend>
     <details class="help"><summary>What a cycle is, and where these names come from</summary><div>
       <p>A <b>cycle</b> is simply a <b>year</b>. Every dataset in a DRA file is
       tagged with the year it describes, and choosing a cycle means &ldquo;use
@@ -267,13 +267,14 @@
     </div></details>
     <p class="note" id="dsStatus">Choose a state first.</p>
     <div class="grid">
-      <label id="w-cycle"><span class="name">Cycle</span>
+      <label id="w-cycle"><span class="name">Census year</span>
         <select id="cycle" class="s-mid"></select>
-        <span class="hint">the year the demographic datasets describe</span></label>
-      <label><span class="name">Census</span><select id="census"></select></label>
-      <label><span class="name">Voting-age pop</span><select id="vap"></select></label>
-      <label><span class="name">Citizen VAP</span><select id="cvap"></select></label>
-      <label id="w-elections"><span class="name">Elections</span>
+        <span class="hint">saved as <code>cycle</code>; picks the three
+          datasets below</span></label>
+      <label><span class="name">Total population</span><select id="census"></select></label>
+      <label><span class="name">Voting-age population</span><select id="vap"></select></label>
+      <label><span class="name">Citizen voting-age population</span><select id="cvap"></select></label>
+      <label id="w-elections"><span class="name">Elections to score</span>
         <select id="elections" multiple></select>
         <span class="hint">several may be chosen</span></label>
       <label><span class="name">&nbsp;</span>
@@ -287,7 +288,7 @@
   </fieldset>
 
   <fieldset>
-    <legend>Starting plan</legend>
+    <legend>The plan the chain starts from</legend>
     <details class="help"><summary>What this does</summary><div>
       <p>Before the chain can run it needs one valid plan to start from, drawn
       by splitting the precinct graph into population-balanced pieces.</p>
@@ -300,14 +301,14 @@
       which governs every later plan. The starting one is usually tighter.</p>
     </div></details>
     <div class="grid">
-      <label id="w-seed_tolerance"><span class="name">Population tolerance</span>
+      <label id="w-seed_tolerance"><span class="name">How balanced the first plan must be</span>
         <input type="number" id="seed_tolerance" class="frac" step="0.001" placeholder="0.01">
         <span class="hint">no default; 0.01 is a common starting point</span></label>
     </div>
   </fieldset>
 
   <fieldset>
-    <legend>Chain</legend>
+    <legend>How the ensemble is generated</legend>
     <details class="help"><summary>What these mean</summary><div>
       <p>The chain repeatedly merges two neighbouring districts and splits them
       again, keeping the result if it is balanced enough. Each accepted step is
@@ -343,16 +344,18 @@
       parameters.</p>
     </div></details>
     <div class="grid">
-      <label id="w-plans"><span class="name">Plans</span>
+      <label id="w-plans"><span class="name">Ensemble size</span>
         <input type="number" id="plans" class="n-wide" min="1" placeholder="e.g. 10000">
-        <span class="hint">or give steps instead</span></label>
-      <label><span class="name">Steps</span>
+        <span class="hint">how many plans you want; saved as
+          <code>plans</code></span></label>
+      <label><span class="name">Chain steps, instead of a size</span>
         <input type="number" id="steps" class="n-wide" min="1" placeholder="chain steps">
-        <span class="hint">plans &times; sample every</span></label>
-      <label id="w-sample_every"><span class="name">Sample every</span>
+        <span class="hint">for saying it the other way round: size &times;
+          sampling interval</span></label>
+      <label id="w-sample_every"><span class="name">Keep one plan every</span>
         <input type="number" id="sample_every" min="1">
-        <span class="hint">1 by default: every step is scored</span></label>
-      <label><span class="name">Variant</span>
+        <span class="hint">steps. 1 by default: every step is kept</span></label>
+      <label><span class="name">How the chain proposes changes</span>
         <select id="variant" class="s-mid">
           <option value="cut-edges-ust">cut-edges-ust &mdash; the usual choice</option>
           <option value="cut-edges-region-aware">cut-edges-region-aware</option>
@@ -362,38 +365,38 @@
           <option value="district-pairs-mst">district-pairs-mst</option>
           <option value="reversible">reversible &mdash; needs balance bound</option>
         </select></label>
-      <label id="w-tolerance"><span class="name">Population tolerance</span>
+      <label id="w-tolerance"><span class="name">How balanced every plan must be</span>
         <input type="number" id="tolerance" class="frac" step="0.001" placeholder="0.05">
         <span class="hint">no default; 0.05 is common for legislative plans</span></label>
-      <label id="w-rng_seed"><span class="name">RNG seed</span>
+      <label id="w-rng_seed"><span class="name">Random seed</span>
         <input type="number" id="rng_seed" class="n-wide" min="0" placeholder="any number">
         <span class="hint">write it down; it reproduces the ensemble</span></label>
-      <label><span class="name">Chains</span>
+      <label><span class="name">Independent chains</span>
         <input type="number" id="chains" min="1">
         <span class="hint">1 by default; 4 lets R-hat work</span></label>
-      <label><span class="name">Segment steps</span>
+      <label><span class="name">Steps between stopping points</span>
         <input type="number" id="segment_steps" class="n-wide" min="1" placeholder="one segment">
         <span class="hint">blank is the default: one segment, so Stop has
           nowhere to act</span></label>
-      <label id="w-balance_ub"><span class="name">Balance upper bound</span>
+      <label id="w-balance_ub"><span class="name">Balance bound</span>
         <input type="number" id="balance_ub" class="n-wide" min="0" placeholder="reversible only"></label>
-      <label id="w-region_weights"><span class="name">Region weights</span>
+      <label id="w-region_weights"><span class="name">Keep regions whole</span>
         <input type="text" id="region_weights" placeholder="COUNTY=1.0">
         <span class="hint">comma separated; region-aware variants only</span></label>
-      <label><span class="name">Target population</span>
+      <label><span class="name">Ideal population per district</span>
         <input type="number" id="target_pop" class="n-wide" min="1" placeholder="total / districts">
         <span class="hint">blank is the default: total divided by districts</span></label>
-      <label><span class="name">Threads</span>
+      <label><span class="name">Worker threads</span>
         <input type="number" id="threads" min="1">
         <span class="hint">1 by default; above 1 is not reproducible</span></label>
-      <label><span class="name">Batch size</span>
+      <label><span class="name">Steps per unit of threaded work</span>
         <input type="number" id="batch_size" min="1">
         <span class="hint">1 by default; only matters above one thread</span></label>
     </div>
   </fieldset>
 
   <fieldset>
-    <legend>Output</legend>
+    <legend>Where the results go</legend>
     <details class="help"><summary>What gets written, and where</summary><div>
       <p>The <b>output directory</b> holds this run: <code>scores.csv</code> (one
       row per plan), <code>by_district.jsonl</code>, <code>manifest.json</code>,
@@ -408,16 +411,16 @@
       later, and it is much the largest file.</p>
     </div></details>
     <div class="grid">
-      <label id="w-out"><span class="name">Output directory</span>
+      <label id="w-out"><span class="name">Where to write the results</span>
         <input type="text" id="out" placeholder="/path/to/results">
         <span class="hint">not saved in the settings file</span></label>
-      <label><span class="name">Package cache</span>
+      <label><span class="name">Where downloads are kept</span>
         <input type="text" id="cache">
         <span class="hint">the per-user default, shown so you can change
           it; not saved in the settings file</span></label>
     </div>
     <div style="margin-top:14px">
-      <span class="name" style="font-weight:550">Keep intermediates</span>
+      <span class="name" style="font-weight:550">Also write intermediate files</span>
       <span class="hint">none by default; <code>plans</code> is the ensemble
         itself, and is what lets a run be extended later</span>
       <div class="checks" id="keep" style="margin-top:6px"></div>
@@ -439,13 +442,13 @@
       The earlier run must have kept its plans.
     </p>
     <div class="grid">
-      <label><span class="name">Earlier results</span>
+      <label><span class="name">Ensemble to extend</span>
         <input type="text" id="ex_from" placeholder="/path/to/results">
         <span class="hint" id="ex_hint">a directory from a previous run</span></label>
-      <label><span class="name">Where the longer one goes</span>
+      <label><span class="name">Where to write the longer ensemble</span>
         <input type="text" id="ex_out" placeholder="/path/to/results-longer">
         <span class="hint">the original is left alone</span></label>
-      <label><span class="name">Add plans</span>
+      <label><span class="name">How many more plans</span>
         <input type="number" id="ex_plans" class="n-wide" min="1" placeholder="how many more">
         <span class="hint">more than it has, not more from the resume point</span></label>
       <label><span class="name">&nbsp;</span>
@@ -605,6 +608,14 @@ function audit(defaults) {
   }
 }
 
+// The words the form uses, so the tally names what the user sees rather than
+// what the settings file calls it. Taken from the label itself, so renaming a
+// field in one place renames it in both.
+function labelFor(field) {
+  const name = $('w-' + field)?.querySelector('.name')?.textContent?.trim();
+  return (name || field.replace(/_/g, ' ')).toLowerCase();
+}
+
 // --- what is still wanted --------------------------------------------------
 // The list comes from the same Rust that refuses an incomplete run, so the
 // form cannot ask for one thing and the run require another.
@@ -627,7 +638,7 @@ async function refresh() {
   } else {
     box.className = '';
     box.innerHTML = '<b>Still needed:</b> ' +
-      wanted.map(w => `<span class="item" title="${w.says.replace(/"/g, '&quot;')}">${w.field.replace(/_/g, ' ')}</span>`)
+      wanted.map(w => `<span class="item" title="${w.says.replace(/"/g, '&quot;')}">${labelFor(w.field)}</span>`)
             .join(' &middot; ');
   }
   $('start').disabled = running || wanted.length > 0;
