@@ -520,18 +520,23 @@ end are regenerated. Nothing is lost: they regenerate identically, being a
 prefix of the same stream. `--steps 200` still means two hundred steps more
 than the ensemble has, not two hundred past the resume point.
 
-Two conditions, both reported when they fail:
+One condition: **the earlier run must have been segmented.** An unsegmented
+chain is one continuous stream with no boundary to rejoin.
 
-- **The earlier run must have been segmented.** An unsegmented chain is one
-  continuous stream with no boundary to rejoin.
-- **`--segment-steps` must be a multiple of `--sample-every`,** or no plan
-  was written at a boundary.
+The two intervals need no particular relationship. `--segment-steps` and
+`--sample-every` count different things — where the chain can be interrupted,
+and which steps are scored — and the sampling grid is absolute, so boundaries
+never disturb it. `extend` simply looks for the last saved plan sitting on a
+multiple of the segment length:
 
-When either fails, the extension still continues the chain — resuming from
-the last saved plan is a valid continuation, since ReCom is Markov — but it
-draws a fresh stream and will not match one longer run. Passing a different
-`--segment-steps` to `extend` has the same effect, because it moves every
-boundary.
+| segment | sample every | |
+|---|---|---|
+| 500 | 2000 | every saved plan is a boundary |
+| 2000 | 500 | every boundary is a saved plan |
+| 300 | 2000 | both only at multiples of 6000, so it backs up further |
+
+All three resume exactly. Passing a *different* `--segment-steps` to `extend`
+does not, because it moves every boundary.
 
 Single-chain runs only, for now. With `--chains` it is no longer one question
 which chain an R-hat was computed over, so `extend` refuses rather than

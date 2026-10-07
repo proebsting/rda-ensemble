@@ -193,21 +193,41 @@ fn read_earlier(dir: &Path) -> Result<Earlier> {
             dir.display()
         );
     }
-    // Where to rejoin the stream. A boundary if there is one to be had,
-    // and the last saved plan otherwise.
-    let why_not = match (settings.segment_steps, settings.sample_every) {
-        (None, _) => Some(
-            "That ensemble was not segmented, so it has no boundary to rejoin."
-                .to_string(),
-        ),
-        (Some(length), every) if every != 0 && length % every != 0 => Some(format!(
-            "Its segment length {length} is not a multiple of its sampling \
-             interval {every}, so no plan was written at a boundary."
-        )),
-        _ => None,
+    // Where to rejoin the stream.
+    //
+    // Divisibility between the segment length and the sampling interval does
+    // not decide this, and an earlier version that tested it got the test
+    // backwards: segments of 500 with sampling every 2000 writes a plan at
+    // *every* boundary, which is the best case, and was rejected as the
+    // worst. What matters is only whether some saved plan sits on a multiple
+    // of the segment length, so the honest way to find out is to look.
+    let (step, plan, why_not) = match settings.segment_steps {
+        None => {
+            let (step, plan) = resume_point(&plans, None)?;
+            (
+                step,
+                plan,
+                Some(
+                    "That ensemble was not segmented, so it has no boundary to \
+                     rejoin."
+                        .to_string(),
+                ),
+            )
+        }
+        Some(length) => match resume_point(&plans, Some(length)) {
+            Ok((step, plan)) => (step, plan, None),
+            // Step 0 is both a boundary and always saved, so this is close to
+            // unreachable; honour it rather than rely on that.
+            Err(_) => {
+                let (step, plan) = resume_point(&plans, None)?;
+                (step, plan, Some(format!(
+                    "No saved plan of that ensemble sits on a multiple of its \
+                     segment length {length}."
+                )))
+            }
+        },
     };
-    let boundary = why_not.as_ref().map_or(settings.segment_steps, |_| None);
-    let (step, plan) = resume_point(&plans, boundary)?;
+    let boundary = why_not.is_none().then_some(()).and(settings.segment_steps);
 
     // Steps the earlier run covers. The manifest records the last step it
     // reached; one more than that is its length.
@@ -496,6 +516,38 @@ mod tests {
         assert_eq!(segments_taken(&dir), 1);
         std::fs::write(dir.join("manifest.json"), "{\"chain\":{\"segments_taken\":7}}").unwrap();
         assert_eq!(segments_taken(&dir), 7);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Segments of 500 with sampling every 2000 writes a plan at every
+    /// boundary -- the best case. An earlier version tested divisibility the
+    /// other way round and rejected it as the worst.
+    #[test]
+    fn a_segment_smaller_than_the_sampling_interval_still_lands_on_boundaries() {
+        let dir = scratch("smaller");
+        let path = plans_file(&dir, &[0, 2000, 4000, 6000, 8000]);
+        // Every one of those is a multiple of 500.
+        assert_eq!(resume_point(&path, Some(500)).expect("reads").0, 8000);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// And the other way round: segments of 2000 with sampling every 500
+    /// writes a plan at every boundary too, plus three that are not.
+    #[test]
+    fn a_segment_larger_than_the_sampling_interval_backs_up_to_one() {
+        let dir = scratch("larger");
+        let path = plans_file(&dir, &[0, 500, 1000, 1500, 2000, 2500]);
+        assert_eq!(resume_point(&path, Some(2000)).expect("reads").0, 2000);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Awkward combinations still resume, just further back: with segments of
+    /// 300 and sampling every 2000, only multiples of 6000 are both.
+    #[test]
+    fn coprime_intervals_resume_at_a_common_multiple() {
+        let dir = scratch("coprime");
+        let path = plans_file(&dir, &[0, 2000, 4000, 6000, 8000]);
+        assert_eq!(resume_point(&path, Some(300)).expect("reads").0, 6000);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
