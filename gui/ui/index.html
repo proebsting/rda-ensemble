@@ -142,6 +142,26 @@
   table.cache td.n { text-align: right; font-variant-numeric: tabular-nums; }
   .total { color: var(--dim); margin-top: 10px; }
 
+  /* A question mark beside every question, and its answer beneath. Inline
+     rather than floating: it cannot land off-screen, it reflows at any
+     window width, and it is still there when you look back. */
+  button.ask {
+    margin-left: 7px; padding: 0; width: 18px; height: 18px; line-height: 16px;
+    border-radius: 50%; font-size: 12px; font-weight: 700; vertical-align: 1px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--dim);
+  }
+  button.ask:hover { color: var(--accent); border-color: var(--accent); }
+  button.ask[aria-expanded="true"] {
+    background: var(--accent); border-color: var(--accent); color: var(--accent-ink);
+  }
+  .said {
+    margin-top: 8px; padding: 10px 12px; font-size: 13.5px; line-height: 1.5;
+    background: var(--bg); border: 1px solid var(--line);
+    border-left: 3px solid var(--accent); border-radius: 5px;
+  }
+  .said p { margin: 0 0 7px; }
+  .said p:last-child { margin-bottom: 0; }
+
   /* Per-pane explanation. Collapsed, so it is there when wanted and out of
      the way when not. */
   details.help { margin: -6px 0 14px; }
@@ -375,12 +395,14 @@
           it can be stopped between them &mdash; emptied, Stop has nowhere to
           act. It changes which plans you get, and is recorded, so quote it
           with the seed.
-          <p style="margin:7px 0 0">The window starts it at 5000, which is
-          under five seconds of chain even in the slowest arrangement. How long
-          a step takes depends on how many precincts a merged pair spans, so
+          <p style="margin:7px 0 0">The window starts it at 500. How long a
+          step takes depends on how many precincts a merged pair spans, so
           <em>fewer</em> districts run slower, not faster: Michigan at 4
-          districts manages about 1,200 steps a second against 3,400 at 13.
-          Chopping the chain costs nothing measurable.</p>
+          districts manages about 1,200 steps a second against 3,400 at 13, so
+          500 steps is under half a second either way. <code>reversible</code>
+          is slower still by orders of magnitude, which is the reason for not
+          choosing a larger number. Chopping the chain costs nothing
+          measurable.</p>
           <p style="margin:7px 0 0">It is a fixed number rather than one timed
           on your machine, because the segment length changes the ensemble and
           a measured value would make the same settings give different results
@@ -446,10 +468,10 @@
       <div class="grid">
         <label><span class="name">Steps between stopping points</span>
           <input type="number" id="segment_steps" class="n-wide" min="1" placeholder="one segment">
-          <span class="hint">5000 by default, which is a few seconds of chain:
-            Stop acts at the next boundary. Clearing it makes the run
-            uninterruptible. It changes which plans you get, so it is recorded
-            alongside the seed</span></label>
+          <span class="hint">500 by default, well under a second of chain, so
+            Stop acts promptly. Clearing it makes the run uninterruptible. It
+            changes which plans you get, so it is recorded alongside the
+            seed</span></label>
         <label><span class="name">Worker threads</span>
           <input type="number" id="threads" min="1">
           <span class="hint">1 by default. Above 1 is faster but the run stops
@@ -1001,6 +1023,269 @@ $('extend').onclick = async () => {
   } catch (e) { say(String(e), 'bad'); }
 };
 
+// ---------------------------------------------------------------------------
+// A question mark beside every question.
+//
+// Written as data rather than markup so that coverage can be checked: every
+// field the form collects must have an entry, and `attachHelp` reports any
+// that does not rather than leaving a silent gap.
+//
+// The audience is people who know redistricting and not Markov chains, so
+// each says what the setting is for and what goes wrong if it is set badly,
+// rather than restating the label.
+// ---------------------------------------------------------------------------
+const HELP = {
+  state: `<p>Which state's data to use. The list comes from Dave's
+    Redistricting, which publishes precinct-level population, demographics and
+    past election results for every state.</p>
+    <p>Choosing one reads that state's file, downloading it first if needed.</p>`,
+
+  plan_type: `<p>Congressional, state upper house, or state lower house. This
+    sets how many districts are drawn &mdash; the number that chamber actually
+    has &mdash; and which legal expectations the result will be read against.</p>
+    <p>There is no default because the three differ in almost everything:
+    district size, population tolerance that courts accept, and how many
+    districts there are.</p>`,
+
+  districts: `<p>Leave blank to draw the number the chamber really has.</p>
+    <p>Set it only to ask a deliberate what-if: &ldquo;what would Michigan's
+    congressional map look like with 4 districts instead of 13?&rdquo; The run
+    warns when your number differs from the statutory one, so a typo does not
+    pass unnoticed.</p>`,
+
+  dra_version: `<p>Dave's Redistricting republishes a state's data as errors are
+    found and corrected. Each version is kept separately.</p>
+    <p>Blank uses whatever is newest today, which means the same settings may
+    not reproduce next year. Pin a version for anything you intend to publish
+    or hand to someone else.</p>`,
+
+  adjacency: `<p>The chain works by merging two neighbouring districts and
+    splitting them again, so which precincts count as neighbours decides where
+    it can move at all.</p>
+    <p>This is not quite the same as which precincts share a border. DRA's
+    published graph also joins precincts across water. Alaska runs only with
+    DRA's graph: worked out from the shapes alone it falls into disconnected
+    pieces and no chain is possible.</p>`,
+
+  cycle: `<p>A shortcut. Every dataset carries the year it describes, and
+    picking a year fills the three population menus with that year's
+    datasets.</p>
+    <p>You can change any of them afterwards and your choice wins. Where a year
+    has two equally good candidates &mdash; 2020 has both a decennial count and
+    an ACS estimate &mdash; it says so and leaves the choice to you.</p>`,
+
+  census: `<p>Total population, used for population balance: how nearly equal
+    the districts are.</p>
+    <p>The decennial census count is the legal basis for apportionment. An ACS
+    estimate is a survey and carries sampling error, so prefer the census count
+    unless you specifically want the estimate.</p>`,
+
+  vap: `<p>Voting-age population &mdash; residents old enough to vote,
+    citizens or not.</p>
+    <p>Used by the minority-representation measures. Which of VAP and citizen
+    VAP is appropriate is a contested question in voting-rights work; this run
+    computes both.</p>`,
+
+  cvap: `<p>Citizen voting-age population &mdash; those actually eligible to
+    vote.</p>
+    <p>This is what the majority-minority district counts are computed from,
+    following <em>Bartlett v. Strickland</em>'s focus on citizen voting-age
+    majorities. It comes from ACS estimates, since the census does not ask
+    about citizenship.</p>`,
+
+  elections: `<p>What gets scored is always a <em>plan</em>. But the partisan
+    measures &mdash; efficiency gap, declination, seats bias, mean-median
+    &mdash; ask how a plan would have treated the parties, which cannot be
+    answered without real votes. An election dataset supplies them.</p>
+    <p>Picking two does not score two things: it scores every plan twice, once
+    against each election, giving two sets of partisan columns. Useful when a
+    plan looks fair under one election and not another.</p>`,
+
+  expand_composites: `<p>A composite is one dataset averaging several real
+    contests &mdash; <code>E_16-20_COMP</code> blends 2016, 2018 and 2020 so no
+    single year dominates. The contests it averages are listed beside its
+    name.</p>
+    <p>Ticking this also measures plans against each of those contests
+    separately, so you can see whether a finding holds across years or rests on
+    one of them. It does nothing unless what you picked is a composite.</p>`,
+
+  seed_tolerance: `<p>Before the chain can run it needs one valid plan to start
+    from, found by splitting the precinct map into population-balanced
+    pieces.</p>
+    <p>This is how balanced that first plan must be, as a fraction: 0.01 means
+    within 1% of equal. Tighter is harder to find, and too tight makes the
+    search fail rather than return something unbalanced. North Dakota's upper
+    house needs it looser, and takes about half a minute to say so.</p>`,
+
+  plans: `<p>How many plans the ensemble should contain. This is the number
+    your conclusions rest on: a plan is judged by where it falls among them, so
+    too few leaves the comparison noisy.</p>
+    <p>Ten thousand is a common published size. The chain runs for this many
+    multiplied by the sampling interval, so 10,000 kept one in every 200 is two
+    million steps.</p>`,
+
+  steps: `<p>The same request made the other way round, in chain steps rather
+    than plans. Give one or the other.</p>
+    <p>The trap this avoids: asking for 10,000 <em>steps</em> while keeping one
+    plan in 200 gives an ensemble of fifty, not ten thousand, and nothing
+    about the output says so.</p>`,
+
+  sample_every: `<p>The chain produces a plan at every step, and this decides
+    which of them the ensemble is made of. It is not a question of which plans
+    get scored &mdash; every plan in the ensemble is scored.</p>
+    <p>Consecutive plans differ by one merge-and-split, so they strongly
+    resemble each other. Keeping one in every N gives an ensemble whose members
+    are more nearly independent. The effective sample size reported at the end
+    tells you whether N was large enough.</p>`,
+
+  variant: `<p>How the chain proposes each change. All seven are legitimate
+    ReCom variants and all produce valid ensembles; they differ in what
+    distribution they converge to and how quickly.</p>
+    <p><code>cut-edges-ust</code> is what most published work uses. The
+    region-aware ones prefer cuts that leave counties whole.
+    <code>reversible</code> samples the intended distribution exactly but
+    rejects most proposals, so it needs far more steps and runs much more
+    slowly.</p>`,
+
+  tolerance: `<p>How far a district's population may sit from ideal during the
+    chain, as a fraction. 0.05 means within 5%.</p>
+    <p>Looser than the starting plan's tolerance, because the chain has to be
+    able to move. Too tight and almost every proposal is rejected, so the chain
+    explores very little while appearing to run normally &mdash; watch the
+    effective sample size for that.</p>`,
+
+  rng_seed: `<p>Any number. The same seed with the same settings reproduces the
+    identical ensemble, which is what makes a result checkable by someone
+    else.</p>
+    <p>Write it down, or keep the <code>settings.json</code> written beside the
+    results, which records it for you.</p>`,
+
+  chains: `<p>Independent runs of the chain, each from a different starting
+    plan, run at the same time.</p>
+    <p>One chain cannot tell you whether it explored the whole space or got
+    stuck in a corner: its samples can look perfectly well-behaved either way.
+    Several can, by asking whether they agree &mdash; that is the R-hat
+    reported at the end, and it needs at least two. Four is usual.</p>`,
+
+  balance_ub: `<p>Required by <code>reversible</code> and used by nothing else.
+    It is the normalising constant that variant needs in order to accept
+    proposals at the right rate.</p>
+    <p>Set it too low and almost nothing is accepted; a few hundred steps may
+    produce no movement at all.</p>`,
+
+  region_weights: `<p>Required by the region-aware variants. Written as
+    <code>COUNTY=1.0</code>, comma separated.</p>
+    <p>It makes the chain prefer cuts that leave a region whole, so the
+    ensemble is drawn from plans that split fewer counties &mdash; a different
+    population of plans, not the same one filtered. Higher weights mean a
+    stronger preference.</p>`,
+
+  target_pop: `<p>Leave this blank.</p>
+    <p>Districts divide the whole state between them, so their average
+    population is necessarily the total divided by the number of districts, and
+    nothing here can change that. What it does change is the number the
+    tolerance is measured from, which makes the accepted range lopsided about
+    the average that will occur anyway.</p>
+    <p>It is reachable because every rustrecom parameter is, not because a run
+    normally wants it.</p>`,
+
+  segment_steps: `<p>The chain runs in pieces of this many steps and can be
+    stopped between them. Emptied, a run cannot be interrupted at all.</p>
+    <p>It changes which plans come out, because each piece draws its own random
+    numbers, so it is recorded alongside the seed and must be quoted with it.
+    Chopping costs no time: fifty thousand steps took the same whether run in
+    one piece or a thousand.</p>`,
+
+  threads: `<p>Worker threads for the chain. More is faster.</p>
+    <p>The cost is reproducibility: above 1, the same seed no longer gives the
+    same ensemble, because which proposal lands in which batch depends on
+    timing. Leave it at 1 for anything anyone else needs to repeat.</p>`,
+
+  batch_size: `<p>How many chain steps are handed to a worker at a time. It
+    does nothing at all unless threads is above 1.</p>
+    <p>Larger batches suit variants that reject most proposals, since each
+    worker then has more to do before reporting back.</p>`,
+
+  keep: `<p>Files that would otherwise be passed from one stage to the next in
+    memory and discarded.</p>
+    <p><code>plans</code> is the one to think about: it is the ensemble itself,
+    it is what lets this run be extended later, and it is much the largest
+    file. The others are mostly for checking the tool against the
+    stage-by-stage command line.</p>`,
+
+  prefixes: `<p>Names each score column after the dataset it came from, so
+    columns from two elections can be told apart.</p>
+    <p>Off gives the plainer names that <code>rdapy</code> produces, which is
+    what existing analysis scripts expect.</p>`,
+
+  reverse_weight_splitting: `<p>Adds two further columns measuring county
+    splitting under Don Leake's reverse weighting, an alternative to the
+    default measure.</p>
+    <p>Harmless to leave off unless you specifically want that comparison.</p>`,
+
+  out: `<p>A directory for this run's results: the scores, the per-district
+    figures, the record of what was run, and the convergence diagnostics.</p>
+    <p>One directory per run. It is not saved in a settings file, because it is
+    yours rather than the ensemble's.</p>`,
+
+  cache: `<p>Where downloaded data is kept, shared by every run: a state is
+    fetched the first time it is needed and reused after that.</p>
+    <p>Nothing a run produces goes here, and deleting it costs only the time to
+    download again. The Downloads tab shows what is in it.</p>`,
+
+  ex_from: `<p>A directory from an earlier run, which will be continued rather
+    than repeated.</p>
+    <p>That run must have kept its plans, since the plan to carry on from is
+    otherwise not written down. Its settings are read from here, not from the
+    Build tab.</p>`,
+
+  ex_out: `<p>Where the longer ensemble goes. The earlier results are copied
+    here first and added to, so the original directory is left exactly as it
+    was.</p>`,
+
+  ex_plans: `<p>How many plans to add to the ensemble it already has &mdash;
+    not how many to run from the resume point, which may be slightly
+    earlier.</p>
+    <p>If the earlier run was segmented, the result is identical to having
+    asked for the longer ensemble in the first place.</p>`,
+};
+
+/// Put a question mark beside every question, and its answer beneath.
+function attachHelp() {
+  const missing = [];
+  for (const [id, text] of Object.entries(HELP)) {
+    const el = $(id);
+    if (!el) { missing.push(id); continue; }
+    const label = el.closest('label') || el.parentElement;
+    if (!label) { missing.push(id); continue; }
+    const panel = document.createElement('div');
+    panel.className = 'said';
+    panel.hidden = true;
+    panel.innerHTML = text;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ask';
+    btn.textContent = '?';
+    btn.setAttribute('aria-expanded', 'false');
+    btn.setAttribute('aria-label', 'what this means');
+    btn.onclick = e => {
+      e.preventDefault();
+      panel.hidden = !panel.hidden;
+      btn.setAttribute('aria-expanded', String(!panel.hidden));
+    };
+    (label.querySelector('.name') || label).appendChild(btn);
+    label.appendChild(panel);
+  }
+  // Every field the form collects should have an answer waiting.
+  const uncovered = FIELDS.map(([k]) => k)
+    .concat(['out', 'cache'])
+    .filter(k => !(k in HELP));
+  if (uncovered.length || missing.length) {
+    say(`Help is missing for: ${[...uncovered, ...missing].join(', ')}. ` +
+        `Please report this.`, 'bad');
+  }
+}
+
 // --- choosing directories --------------------------------------------------
 // The chooser is driven from Rust: the dialog plugin's JavaScript side comes
 // from an npm package and this app has no bundler.
@@ -1095,6 +1380,7 @@ for (const k of Object.keys(BLANK_MEANS_UNDECIDED)) {
 }
 
 (async function init() {
+  attachHelp();
   const defaults = await invoke('form_defaults');
   audit(defaults);
   fill(defaults);

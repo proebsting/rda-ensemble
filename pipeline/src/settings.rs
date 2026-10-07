@@ -36,20 +36,30 @@ pub const VERSION: u32 = 1;
 /// keeps its own default of none: changing that would alter every ensemble
 /// ever produced by it.
 ///
-/// Five thousand is chosen for the *slowest* configuration rather than the
-/// average. Throughput depends on how many precincts a merged pair spans,
-/// which is roughly twice the precincts per district -- so fewer districts
-/// run slower, not faster. Measured on an M1 Pro: Michigan at 4 districts
-/// manages about 1,200 steps a second, Illinois at 17 about 1,700, Michigan
-/// at 13 about 3,400. Five thousand steps is therefore four seconds at worst
-/// and usually less. Segmenting itself costs nothing measurable: the same
-/// fifty thousand steps took 42.0s chopped and 42.3s whole.
+/// Five hundred, because chopping the chain costs nothing and the variants
+/// differ in speed by more than two orders of magnitude.
+///
+/// Throughput depends on how many precincts a merged pair spans, which is
+/// roughly twice the precincts per district -- so *fewer* districts run
+/// slower, not faster. Measured on an M1 Pro: Michigan at 4 districts manages
+/// about 1,200 steps a second, Illinois at 17 about 1,700, Michigan at 13
+/// about 3,400. Against those, five hundred steps is under half a second.
+///
+/// `reversible` is the reason for not choosing a larger number. It rejects
+/// most proposals and its rate depends on the balance bound rather than on
+/// the state; at 13 districts it did not finish three thousand steps in two
+/// minutes. No fixed segment can bound stopping there, but a small one keeps
+/// it to seconds rather than minutes.
+///
+/// Nothing argues the other way, because segmenting is free: the same fifty
+/// thousand steps took 42.0s in segments of 5000 against 42.3s whole, and a
+/// thousand segments of 50 took 14.7s against 14.6s unsegmented.
 ///
 /// It is a fixed number rather than one derived from timing on purpose. The
 /// segment length changes which plans come out, so a value measured from the
 /// machine would make the same settings produce different ensembles on
 /// different computers. A constant travels with the settings file.
-pub const FORM_SEGMENT_STEPS: u64 = 5_000;
+pub const FORM_SEGMENT_STEPS: u64 = 500;
 
 /// A decision the run needs and has not been given.
 ///

@@ -172,19 +172,24 @@ parameter is, not because a run wants it.
 
 ### Stopping, and the segment size
 
-The window starts **steps between stopping points** at 5000, so Stop works
+The window starts **steps between stopping points** at 500, so Stop works
 without anyone going looking for it. The CLI keeps its own default of none:
 changing that would alter every ensemble it has ever produced.
 
-Five thousand is chosen for the *slowest* ordinary arrangement rather than the
-average, because how long a step takes depends on how many precincts a merged
-pair spans — so **fewer districts run slower, not faster**:
+How long a step takes depends on how many precincts a merged pair spans, so
+**fewer districts run slower, not faster**:
 
-| | steps/s | 5000 steps |
+| | steps/s | 500 steps |
 |---|---|---|
-| Michigan, 4 districts | 1,176 | 4.3s |
-| Illinois, 17 districts | 1,712 | 2.9s |
-| Michigan, 13 districts | 3,425 | 1.5s |
+| Michigan, 4 districts | 1,176 | 0.43s |
+| Illinois, 17 districts | 1,712 | 0.29s |
+| Michigan, 13 districts | 3,425 | 0.15s |
+
+`reversible` is the reason for not choosing a larger number: it rejects most
+proposals and its rate depends on the balance bound rather than the state —
+at 13 districts it did not finish three thousand steps in two minutes. No
+fixed segment can bound stopping there, but a small one keeps it to seconds
+rather than minutes.
 
 Chopping the chain is free. The same 50,000 steps took 42.0s in segments of
 5000 and 42.3s whole; a thousand segments of 50 took 14.7s against 14.6s
@@ -195,11 +200,17 @@ segment length changes which plans come out, so a measured value would make
 the same settings produce different ensembles on different computers. A
 constant travels with the settings file.
 
-Two caveats. On a machine slower than an M1 Pro these times scale up
-proportionally. And `reversible` is far slower per step than the figures
-above — slow enough that its rate depends on `--balance-ub` rather than on the
-state — so Stop will be correspondingly less responsive there. Lowering the
-segment size costs nothing if that matters.
+On a machine slower than an M1 Pro these times scale up proportionally.
+
+### Help on every question
+
+Every field carries a **?** that opens a short explanation beneath it: what
+the setting is for, and what goes wrong if it is set badly. They are written
+for people who know redistricting and not Markov chains.
+
+The text lives in one table in the page rather than in the markup, and the
+window checks at startup that every field it collects has an entry — a field
+added without an explanation is reported rather than left silently bare.
 
 ### Input widths
 
