@@ -64,6 +64,11 @@ pub struct Dataset {
     pub kind: Kind,
     pub name: String,
     pub title: String,
+    /// The year this describes. A "cycle" is this number: asking for 2020
+    /// means the demographic datasets whose year is 2020. Which years exist
+    /// is a property of the file, so a caller offering a choice of cycles
+    /// takes them from here.
+    pub year: i64,
     /// The elections a composite averages, empty for everything else. Which
     /// ones is the thing that decides whether a composite is the right pick.
     pub members: Vec<String>,
@@ -106,6 +111,7 @@ pub fn read(path: &Path) -> Result<Vec<Dataset>> {
                 .and_then(|t| t.as_str())
                 .unwrap_or("")
                 .to_string(),
+            year: year(entry),
             members: members_of(entry),
         })
         .collect())
@@ -267,4 +273,57 @@ pub fn for_cycle(
         vap: resolve(Kind::Vap, "--vap", want_vap)?,
         cvap: resolve(Kind::Cvap, "--cvap", want_cvap)?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A cycle is a year, and which years exist is a property of the file.
+    /// A caller offering a choice of cycles reads them from here, so each
+    /// dataset has to carry its own.
+    #[test]
+    fn every_dataset_reports_its_year() {
+        let doc = serde_json::json!({
+            "datasets": {
+                "T_20_CENS": { "type": "demographic", "title": "Total Population 2020",
+                               "year": 2020 },
+                "T_10_CENS": { "type": "demographic", "title": "Total Population 2010",
+                               "year": 2010 },
+                "V_20_VAP":  { "type": "demographic", "title": "VAP 2020",
+                               "year": 2020, "votingAge": true },
+                "V_20_CVAP": { "type": "demographic", "title": "Citizen VAP 2020",
+                               "year": 2020, "votingAge": true },
+                "E_16-20_COMP": { "type": "election", "title": "Composite 2016-2020",
+                                  "year": 2020, "members": { "1": "E_20_PRES" } },
+                "SHAPES": { "type": "shapes", "title": "not a dataset we use" }
+            }
+        });
+        let dir = std::env::temp_dir().join(format!("rda-ds-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("x.geojson");
+        std::fs::write(&path, doc.to_string()).unwrap();
+
+        let rows = read(&path).expect("reads");
+        // The shapes entry classifies as nothing and is left out.
+        assert_eq!(rows.len(), 5);
+
+        let years: std::collections::BTreeSet<i64> = rows
+            .iter()
+            .filter(|d| d.kind != Kind::Election)
+            .map(|d| d.year)
+            .collect();
+        assert_eq!(years.into_iter().collect::<Vec<_>>(), vec![2010, 2020]);
+
+        let cvap = rows.iter().find(|d| d.name == "V_20_CVAP").expect("cvap");
+        assert_eq!(cvap.kind, Kind::Cvap);
+        assert_eq!(cvap.year, 2020);
+
+        // A composite names what it averages, which is how anyone decides
+        // whether it is the right choice.
+        let comp = rows.iter().find(|d| d.name == "E_16-20_COMP").expect("election");
+        assert_eq!(comp.members, vec!["E_20_PRES"]);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

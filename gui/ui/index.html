@@ -129,6 +129,24 @@
   table.cache th { color: var(--dim); font-weight: 550; font-size: 14px; }
   table.cache td.n { text-align: right; font-variant-numeric: tabular-nums; }
   .total { color: var(--dim); margin-top: 10px; }
+
+  /* Per-pane explanation. Collapsed, so it is there when wanted and out of
+     the way when not. */
+  details.help { margin: -6px 0 14px; }
+  details.help summary {
+    cursor: pointer; color: var(--accent); font-size: 14px; width: fit-content;
+  }
+  details.help summary:hover { text-decoration: underline; }
+  details.help div {
+    margin-top: 9px; padding: 11px 14px; font-size: 14px;
+    background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+  }
+  details.help p { margin: 0 0 9px; }
+  details.help p:last-child { margin-bottom: 0; }
+  details.help code { font-size: 13px; }
+  details.help dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; }
+  details.help dt { font-weight: 600; white-space: nowrap; }
+  details.help dd { margin: 0; }
 </style>
 </head>
 <body>
@@ -168,6 +186,23 @@
 
   <fieldset>
     <legend>Data</legend>
+    <details class="help"><summary>What these mean</summary><div>
+      <dl>
+        <dt>State</dt><dd>Chooses which of Dave&rsquo;s Redistricting packages to
+          use. Picking one reads its datasets automatically if the package is
+          already downloaded; otherwise you are told what it would fetch.</dd>
+        <dt>DRA version</dt><dd>DRA republishes a state&rsquo;s data as it is
+          corrected. Leaving this blank uses whatever is newest, which means a
+          run repeated next year may not match. Pin a version for anything you
+          intend to reproduce.</dd>
+        <dt>Adjacency</dt><dd>Which precincts border which &mdash; the chain can
+          only move between neighbours. DRA ships a graph; the alternative is
+          deriving one from the precinct shapes. They disagree where water
+          crossings are involved, and Alaska only works with DRA&rsquo;s.</dd>
+        <dt>Districts</dt><dd>Blank draws the number the chamber actually has.
+          Set it only to ask a deliberate what-if.</dd>
+      </dl>
+    </div></details>
     <div class="grid">
       <label id="w-state"><span class="name">State</span>
         <select id="state"></select>
@@ -195,14 +230,26 @@
 
   <fieldset>
     <legend>Datasets</legend>
-    <p class="note">
-      Give a census cycle, or name all three demographic datasets.
-      <button id="loadDatasets" class="small">Read this state&rsquo;s datasets</button>
-    </p>
+    <details class="help"><summary>What a cycle is, and where these names come from</summary><div>
+      <p>A <b>cycle</b> is simply a <b>year</b>. Every dataset in a DRA file is
+      tagged with the year it describes, and choosing a cycle means &ldquo;use
+      the population, voting-age and citizen voting-age datasets for that
+      year&rdquo;. Which years exist is a property of the file, so the menu is
+      built from the file rather than from a fixed list.</p>
+      <p>You can name the three datasets individually instead. That is stricter,
+      and worth doing for work you want to reproduce: a cycle could resolve
+      differently if DRA republishes the state. Where a year has two equally
+      good candidates &mdash; 2020 has both a decennial count and an ACS
+      estimate &mdash; the cycle refuses to guess and asks you to pick.</p>
+      <p><b>Elections</b> are separate from the demographic datasets and are not
+      chosen by the cycle. A composite such as <code>E_16-20_COMP</code> averages
+      several contests; expanding it scores each one separately as well.</p>
+    </div></details>
+    <p class="note" id="dsStatus">Choose a state first.</p>
     <div class="grid">
       <label id="w-cycle"><span class="name">Cycle</span>
-        <input type="number" id="cycle" placeholder="2020">
-        <span class="hint">picks the three below for that year</span></label>
+        <select id="cycle"></select>
+        <span class="hint">the year the demographic datasets describe</span></label>
       <label><span class="name">Census</span><select id="census"></select></label>
       <label><span class="name">Voting-age pop</span><select id="vap"></select></label>
       <label><span class="name">Citizen VAP</span><select id="cvap"></select></label>
@@ -219,6 +266,17 @@
 
   <fieldset>
     <legend>Starting plan</legend>
+    <details class="help"><summary>What this does</summary><div>
+      <p>Before the chain can run it needs one valid plan to start from, drawn
+      by splitting the precinct graph into population-balanced pieces.</p>
+      <p>This tolerance is how balanced that first plan must be. Tighter is
+      harder to find: too tight and the search fails rather than returning
+      something unbalanced. <code>0.01</code> is a common starting point; North
+      Dakota&rsquo;s upper house needs it looser, and says so after about half a
+      minute of trying.</p>
+      <p>It is a different setting from the chain&rsquo;s own tolerance below,
+      which governs every later plan. The starting one is usually tighter.</p>
+    </div></details>
     <div class="grid">
       <label id="w-seed_tolerance"><span class="name">Population tolerance</span>
         <input type="number" id="seed_tolerance" step="0.001" placeholder="0.01">
@@ -228,6 +286,40 @@
 
   <fieldset>
     <legend>Chain</legend>
+    <details class="help"><summary>What these mean</summary><div>
+      <p>The chain repeatedly merges two neighbouring districts and splits them
+      again, keeping the result if it is balanced enough. Each accepted step is
+      a new plan; a rejected one leaves the plan unchanged, and that repeat
+      still counts, which is what makes the ensemble&rsquo;s distribution right.</p>
+      <dl>
+        <dt>Plans / steps</dt><dd>Ask for plans and the steps are worked out:
+          10,000 plans sampled every 200 is two million steps. Giving steps
+          where you meant plans quietly gives you a two-hundredth of the
+          ensemble.</dd>
+        <dt>Sample every</dt><dd>Consecutive plans resemble each other, so
+          sampling every Nth gives a more independent set. The effective sample
+          size reported at the end says whether N was large enough.</dd>
+        <dt>Variant</dt><dd><code>cut-edges-ust</code> unless you have a reason.
+          The region-aware ones prefer cuts that keep counties whole;
+          <code>reversible</code> samples the intended distribution exactly but
+          rejects most proposals, so it needs far more steps.</dd>
+        <dt>Population tolerance</dt><dd>How far a district may sit from ideal
+          during the chain. Looser than the starting plan&rsquo;s.
+          <code>0.05</code> is common for legislative districts and is what most
+          published ensembles use; congressional work is often tighter.</dd>
+        <dt>Chains</dt><dd>Independent runs from different starting plans. One
+          chain cannot tell you whether it explored the whole space; four can,
+          through R-hat. They run in parallel.</dd>
+        <dt>Segment steps</dt><dd>Runs the chain in pieces so it can be stopped
+          between them &mdash; without it, Stop has nowhere to act. It changes
+          which plans you get, and is recorded, so quote it with the seed.</dd>
+        <dt>RNG seed</dt><dd>Any number. The same seed and settings reproduce
+          the ensemble exactly, so write it down.</dd>
+      </dl>
+      <p>These are conventions, not recommendations from rdapy: rdapy scores
+      plans and does not generate them, so it has nothing to say about chain
+      parameters.</p>
+    </div></details>
     <div class="grid">
       <label id="w-plans"><span class="name">Plans</span>
         <input type="number" id="plans" min="1" placeholder="how many you want">
@@ -276,6 +368,19 @@
 
   <fieldset>
     <legend>Output</legend>
+    <details class="help"><summary>What gets written, and where</summary><div>
+      <p>The <b>output directory</b> holds this run: <code>scores.csv</code> (one
+      row per plan), <code>by_district.jsonl</code>, <code>manifest.json</code>,
+      <code>settings.json</code> and <code>diagnostics.json</code>. With several
+      chains, the per-chain files move into <code>chain_1/</code> and so on.</p>
+      <p>The <b>package cache</b> is shared between every run and holds what has
+      been downloaded from DRA. Nothing a run produces goes there. Neither path
+      is saved in a settings file, because they differ between machines.</p>
+      <p><b>Keep intermediates</b> writes out values that would otherwise just be
+      passed from one stage to the next. <code>plans</code> is the one to think
+      about: it is the ensemble itself, it is what lets the run be extended
+      later, and it is much the largest file.</p>
+    </div></details>
     <div class="grid">
       <label id="w-out"><span class="name">Output directory</span>
         <input type="text" id="out" placeholder="/path/to/results">
@@ -374,7 +479,7 @@ const $ = id => document.getElementById(id);
 const FIELDS = [
   ['state', 'str'], ['plan_type', 'str'], ['districts', 'optnum'],
   ['dra_version', 'optstr'], ['adjacency', 'str'],
-  ['cycle', 'optnum'], ['census', 'optstr'], ['vap', 'optstr'],
+  ['cycle', 'optnumsel'], ['census', 'optstr'], ['vap', 'optstr'],
   ['cvap', 'optstr'], ['elections', 'multi'], ['expand_composites', 'bool'],
   ['seed_tolerance', 'num'], ['steps', 'optnum'], ['plans', 'optnum'],
   ['sample_every', 'num'], ['variant', 'str'], ['tolerance', 'num'],
@@ -408,7 +513,7 @@ function read(key, kind) {
     case 'str': return el.value;
     case 'optstr': return el.value === '' ? null : el.value;
     case 'num': return el.value === '' ? 0 : Number(el.value);
-    case 'optnum': return el.value === '' ? null : Number(el.value);
+    case 'optnum': case 'optnumsel': return el.value === '' ? null : Number(el.value);
     case 'bool': return el.checked;
     case 'multi': return [...el.selectedOptions].map(o => o.value);
     case 'csv': return el.value.split(',').map(s => s.trim()).filter(Boolean);
@@ -422,6 +527,14 @@ function write(key, kind, v) {
   switch (kind) {
     case 'str': case 'optstr': el.value = v ?? ''; break;
     case 'num': case 'optnum': el.value = (v === null || v === undefined) ? '' : v; break;
+    case 'optnumsel': {
+      // A loaded file may name a year before the datasets have been read, so
+      // offer it rather than silently dropping the choice.
+      const want = (v === null || v === undefined) ? '' : String(v);
+      if (want && ![...el.options].some(o => o.value === want)) el.add(new Option(want, want));
+      el.value = want;
+      break;
+    }
     case 'bool': el.checked = !!v; break;
     case 'csv': el.value = (v || []).join(', '); break;
     case 'multi': {
@@ -528,10 +641,33 @@ function versionsFor(state) {
   $('dra_version').value = keep;
 }
 
+// Decide whether the datasets can be read without a download, and either do
+// it or say what it would cost. Nobody should have to guess that a menu is
+// empty because a button has not been pressed.
+async function datasetsFor(state) {
+  const status = $('dsStatus');
+  if (!state) { status.textContent = 'Choose a state first.'; return; }
+  try {
+    const pkg = await invoke('package_status', {
+      state, draVersion: $('dra_version').value || null, cache: $('cache').value || null,
+    });
+    if (pkg.cached) {
+      status.textContent = `Reading ${state} ${pkg.version}…`;
+      await loadDatasets();
+    } else {
+      status.innerHTML =
+        `${state} ${pkg.version} has not been downloaded yet ` +
+        `(${(pkg.bytes / 1e6).toFixed(1)} MB). ` +
+        `<button id="fetchNow" class="small">Download and read its datasets</button>`;
+      $('fetchNow').onclick = loadDatasets;
+    }
+  } catch (e) { status.textContent = String(e); }
+}
+
 async function loadDatasets() {
   const state = $('state').value;
   if (!state) { say('Choose a state first.', 'warn'); return; }
-  say('Reading datasets…');
+  $('dsStatus').textContent = 'Reading datasets… (downloading if needed)';
   try {
     const rows = await invoke('datasets', {
       state, draVersion: $('dra_version').value || null, cache: $('cache').value || null,
@@ -545,6 +681,16 @@ async function loadDatasets() {
       $(id).value = keep;
     };
     put('census', 'census'); put('vap', 'vap'); put('cvap', 'cvap');
+
+    // Cycles are the years the demographic datasets carry -- a property of
+    // this file, not a list anyone could know in advance.
+    const years = [...new Set(rows.filter(d => d.kind !== 'election').map(d => d.year))]
+      .filter(y => y > 0).sort((a, b) => b - a);
+    const keepYear = $('cycle').value;
+    $('cycle').innerHTML = '<option value="">name the three below instead</option>';
+    for (const y of years) $('cycle').add(new Option(y, y));
+    $('cycle').value = years.map(String).includes(keepYear) ? keepYear : '';
+
     const chosen = new Set([...$('elections').selectedOptions].map(o => o.value));
     $('elections').innerHTML = '';
     for (const d of rows.filter(d => d.kind === 'election')) {
@@ -552,9 +698,15 @@ async function loadDatasets() {
       o.selected = chosen.has(d.name);
       $('elections').add(o);
     }
-    say(`${rows.length} datasets.`, 'ok');
+    const n = k => rows.filter(d => d.kind === k).length;
+    $('dsStatus').textContent =
+      `${rows.length} datasets: ${n('census')} population, ${n('vap')} voting-age, ` +
+      `${n('cvap')} citizen voting-age, ${n('election')} elections.`;
     await refresh();
-  } catch (e) { say(String(e), 'bad'); }
+  } catch (e) {
+    $('dsStatus').textContent = String(e);
+    say(String(e), 'bad');
+  }
 }
 
 // --- settings file ---------------------------------------------------------
@@ -580,6 +732,7 @@ $('file').onchange = async e => {
     versionsFor(s.state);
     $('fileMsg').textContent = `loaded ${f.name}`;
     say('Settings loaded. The output directory is yours to choose.', 'ok');
+    await datasetsFor(s.state);
     await refresh();
   } catch (err) { say(String(err), 'bad'); }
   e.target.value = '';
@@ -736,8 +889,11 @@ for (const b of document.querySelectorAll('nav button')) {
 }
 
 // --- wiring ----------------------------------------------------------------
-$('state').onchange = () => versionsFor($('state').value);
-$('loadDatasets').onclick = loadDatasets;
+$('state').onchange = async () => {
+  versionsFor($('state').value);
+  await datasetsFor($('state').value);
+};
+$('dra_version').addEventListener('change', () => datasetsFor($('state').value));
 for (const [k] of FIELDS) {
   $(k).addEventListener('change', refresh);
   $(k).addEventListener('input', refresh);
@@ -752,6 +908,7 @@ for (const k of Object.keys(BLANK_MEANS_UNDECIDED)) {
   fill(defaults);
   $('cache').value = await invoke('default_cache');
   await loadStates();
+  await datasetsFor($('state').value);
   await refresh();
 })();
 </script>

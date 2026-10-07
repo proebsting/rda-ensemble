@@ -54,9 +54,44 @@ Two exceptions it cannot cover, both handled in the page and commented there:
 a seed of zero is a perfectly good seed, so only an empty box means undecided;
 and the output directory is not part of the settings at all.
 
-The state menu comes from DRA's index; the dataset menus come from the chosen
-state's GeoJSON, which is why they are empty until **Read this state's
-datasets**. Required fields are starred.
+The state menu comes from DRA's index. The dataset menus come from the chosen
+state's own file, so choosing a state reads it — silently when the package is
+already downloaded, and otherwise saying what it would fetch and waiting for
+you to agree:
+
+```
+MI v06 has not been downloaded yet (3.8 MB).  [Download and read its datasets]
+```
+
+Nobody should have to work out that a menu is empty because a button has not
+been pressed.
+
+### Cycles
+
+A **cycle** is a year. Every dataset in a DRA file is tagged with the year it
+describes, and choosing a cycle means "use the population, voting-age and
+citizen voting-age datasets for that year". Which years exist is a property of
+the file, so it is a menu built from the file rather than a number you have to
+know — `for_cycle` was already listing the available years in its error
+message, which was the clue that the UI should have been offering them all
+along.
+
+Naming the three datasets individually is stricter and better for work you
+want to reproduce, since a cycle could resolve differently if DRA republishes
+the state.
+
+### Explanations
+
+Each pane has a *What these mean* disclosure, collapsed by default: what a
+cycle is, why there are two population tolerances, what the variants differ
+in, what gets written where.
+
+One thing those say plainly: the suggested values are **conventions, not
+recommendations from rdapy**. rdapy scores plans and does not generate them,
+so it has nothing to say about chain parameters — its only `EPSILON` is a
+float-comparison tolerance. Where a number is offered it is as placeholder
+text, never pre-filled, because a value the tool invented and the user did not
+choose is exactly what this project avoids.
 
 A check worth knowing about: the page declares its fields once, in a list, and
 compares that list against what the Rust side sends at startup. A setting

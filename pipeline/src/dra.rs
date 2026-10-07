@@ -126,6 +126,11 @@ impl Inventory {
         self.states.get(state).is_some_and(|v| v.contains_key(version))
     }
 
+    /// The compressed size of one published version, in bytes.
+    pub fn size(&self, state: &str, version: &str) -> Option<u64> {
+        self.states.get(state)?.get(version).copied()
+    }
+
     pub fn versions(&self, state: &str) -> Vec<String> {
         self.states.get(state).map(|v| v.keys().cloned().collect()).unwrap_or_default()
     }

@@ -102,6 +102,43 @@ fn datasets(
     datasets::read(&package.geojson).map_err(|e| format!("{e:#}"))
 }
 
+/// Whether a state's data is already on disk, and what it would cost.
+///
+/// The dataset menus cannot be filled without the file, and the file may be
+/// a 35 MB download. The window asks this first so it can read the datasets
+/// silently when they are cached, and say what it is about to fetch when
+/// they are not, rather than appearing to hang.
+#[derive(serde::Serialize)]
+struct PackageStatus {
+    version: String,
+    cached: bool,
+    bytes: u64,
+}
+
+#[tauri::command]
+fn package_status(
+    state: String,
+    dra_version: Option<String>,
+    cache: Option<String>,
+) -> Result<PackageStatus, String> {
+    let dir = cache_of(cache).unwrap_or_else(dra::default_cache);
+    let inventory = dra::Inventory::load(&dir).map_err(|e| format!("{e:#}"))?;
+    let (version, bytes) = match dra_version {
+        Some(v) => {
+            let size = inventory
+                .size(&state, &v)
+                .ok_or_else(|| format!("{state} has no version {v}"))?;
+            (v, size)
+        }
+        None => inventory.latest(&state).map_err(|e| format!("{e:#}"))?,
+    };
+    Ok(PackageStatus {
+        cached: dra::cached(&dir, &state, &version).is_some(),
+        bytes,
+        version,
+    })
+}
+
 /// The values the form starts with.
 ///
 /// Read out of clap rather than written again in JavaScript, so the window
@@ -299,6 +336,7 @@ fn main() {
             start,
             start_extend,
             settings_at,
+            package_status,
             cache_contents,
             cache_forget,
             stop,
