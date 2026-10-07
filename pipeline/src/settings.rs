@@ -61,6 +61,26 @@ pub const VERSION: u32 = 1;
 /// different computers. A constant travels with the settings file.
 pub const FORM_SEGMENT_STEPS: u64 = 500;
 
+/// Intermediates a form keeps by default: all of them.
+///
+/// The command line keeps none unless asked, which is the right default for
+/// something run in a loop. A window is used once at a time by somebody who
+/// will not think to ask until it is too late -- and the plans in particular
+/// cannot be recovered afterwards, since they are what an extension carries
+/// on from.
+///
+/// This is affordable because they are compressed. An ensemble is hugely
+/// redundant at long range, and xz reduces one to about a three-hundredth of
+/// its size.
+pub const FORM_KEEP: [&str; 6] = [
+    "data-map",
+    "graph",
+    "data",
+    "recom-graph",
+    "seed-plan",
+    "plans",
+];
+
 /// A decision the run needs and has not been given.
 ///
 /// Reported rather than merely refused, so a form can say what is still
@@ -191,8 +211,12 @@ impl Settings {
                 s.elections = Vec::new();
                 s.plan_type = String::new();
                 s.variant = String::new();
-                // Not a clap default, and deliberately so: see the constant.
+                // Not clap defaults, and deliberately so.
                 s.segment_steps = Some(FORM_SEGMENT_STEPS);
+                // Keeping everything is cheap now that it is compressed, and
+                // the plans are what let a run be extended later. Nothing
+                // here is recoverable once a run has finished without them.
+                s.keep = FORM_KEEP.iter().map(|k| k.to_string()).collect();
                 s
             }
             _ => unreachable!("that argv is a run"),
@@ -810,9 +834,24 @@ mod tests {
         assert!(s.state.is_empty());
         assert!(s.plan_type.is_empty(), "the chamber is nobody's default");
         assert!(s.variant.is_empty(), "nor is the variant");
-        // The one value a form supplies that the command line does not: a
-        // Stop button needs a boundary to stop at.
+        // The two values a form supplies that the command line does not: a
+        // Stop button needs a boundary to stop at, and the intermediates
+        // cannot be recovered after the fact.
         assert_eq!(s.segment_steps, Some(FORM_SEGMENT_STEPS));
+        assert_eq!(s.keep.len(), FORM_KEEP.len());
+        // Every one of them must be a name `into_args` accepts.
+        s.clone().into_args("/tmp/o".into(), None).unwrap_err();
+        let mut usable = s.clone();
+        usable.state = "MI".into();
+        usable.plan_type = "congress".into();
+        usable.variant = "cut-edges-ust".into();
+        usable.cycle = Some(2020);
+        usable.elections = vec!["E".into()];
+        usable.seed_tolerance = 0.01;
+        usable.tolerance = 0.05;
+        usable.plans = Some(10);
+        let args = usable.into_args("/tmp/o".into(), None).expect("keep names parse");
+        assert_eq!(args.keep.len(), FORM_KEEP.len());
         assert_eq!(s.cycle, None);
         assert_eq!(s.steps, None);
         assert!(s.elections.is_empty());

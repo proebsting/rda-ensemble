@@ -202,6 +202,18 @@ constant travels with the settings file.
 
 On a machine slower than an M1 Pro these times scale up proportionally.
 
+### What a run keeps
+
+The window ticks every intermediate by default, where the CLI keeps none
+unless asked. A command line is run in a loop by someone who knows what they
+want; a window is used once by someone who will not think to ask until it is
+too late. The plans especially cannot be recovered afterwards — they are what
+an extension carries on from.
+
+That is affordable because they are compressed: a 20,000-step run keeping
+everything went from 32.4 MB to 2.5 MB. See the CLI README for why xz and not
+brotli — it comes down to `lzma` being in the Python standard library.
+
 ### Help on every question
 
 Every field carries a **?** that opens a short explanation beneath it: what

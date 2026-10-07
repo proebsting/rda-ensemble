@@ -186,7 +186,7 @@ fn read_earlier(dir: &Path) -> Result<Earlier> {
     }
 
     let plans = dir.join("plans.jsonl");
-    if !plans.exists() {
+    if crate::squeeze::locate(&plans).is_none() {
         bail!(
             "{} has no plans.jsonl, so there is no plan to carry on from. \
              An ensemble has to be made with `--keep plans` to be extendable.",
@@ -298,10 +298,10 @@ fn segments_taken(dir: &Path) -> u64 {
 /// without one, simply the last saved plan.
 fn resume_point(path: &Path, segment: Option<u64>) -> Result<(u64, HashMap<String, u32>)> {
     use std::io::BufRead;
-    let file = std::fs::File::open(path)
-        .with_context(|| format!("reading {}", path.display()))?;
+    // Compressed or not, under that name or a compressed one.
+    let reader = crate::squeeze::open(path)?;
     let mut best: Option<(u64, String)> = None;
-    for line in std::io::BufReader::new(file).lines() {
+    for line in reader.lines() {
         let line = line?;
         if line.trim().is_empty() {
             continue;
@@ -362,13 +362,12 @@ fn copy_results(from: &Path, out: &Path, through: u64) -> Result<()> {
 
     for name in ["scores.csv", "by_district.jsonl", "plans.jsonl"] {
         let src = from.join(name);
-        if !src.exists() {
+        if crate::squeeze::locate(&src).is_none() {
             continue;
         }
-        let reader = std::io::BufReader::new(
-            std::fs::File::open(&src)
-                .with_context(|| format!("reading {}", src.display()))?,
-        );
+        let reader = crate::squeeze::open(&src)?;
+        // Written back out plain: the run appends to these, and the final
+        // pass compresses them again.
         let dest = out.join(name);
         let mut writer = std::io::BufWriter::new(
             std::fs::File::create(&dest)

@@ -1426,6 +1426,7 @@ dependencies = [
  "anyhow",
  "clap 4.6.7",
  "ctrlc",
+ "flate2",
  "partigraph",
  "rdarust-core",
  "rdarust-geo",
@@ -1434,6 +1435,7 @@ dependencies = [
  "serde",
  "serde_json",
  "ureq",
+ "xz2",
  "zip",
 ]
 

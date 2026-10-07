@@ -568,6 +568,36 @@ about 780 MB — which is why this command exists.
 publishes. `--cache DIR` points any of this somewhere else, as it does for
 every other subcommand.
 
+## Compressed intermediates
+
+Anything `--keep` writes is compressed with xz when the run finishes.
+`scores.csv` and the three small JSON files are left alone: they are what
+people load into R or Python, and they are small.
+
+It is worth a great deal. An ensemble is enormously redundant at long range —
+consecutive plans differ by one merge-and-split — and that is exactly what a
+large compression window exploits. On one 18.9 MB ensemble:
+
+| | size | of original |
+|---|---|---|
+| gzip -9 | 2,565,657 | 13.58% |
+| xz -6 | 61,928 | 0.33% |
+| brotli q11 | 48,109 | 0.25% |
+
+gzip's 32 KB window cannot see across plans at all. A real run of 20,000
+steps keeping everything went from 32.4 MB to 2.5 MB.
+
+**xz rather than brotli**, though brotli is smaller, because of who opens it.
+`lzma` is in the Python standard library and `xzfile()` is base R, so these
+files read with nothing installed; 7-Zip opens them on Windows. Brotli needs a
+`pip install` and has no common desktop tool. The C dependency xz normally
+implies costs nothing here: rustrecom already depends on `binary-ensemble`,
+which depends on `xz2`.
+
+Reading is transparent and accepts gzip too, so `extend` continues happily
+from an ensemble someone recompressed by hand. The format is decided by the
+bytes, not the file name.
+
 ## Reproducing a run
 
 Every run writes **`settings.json`** beside its results: every decision it

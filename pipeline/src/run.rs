@@ -1017,6 +1017,47 @@ fn chain(
     Ok(summary)
 }
 
+/// Compress the intermediates a run was asked to keep, and say what that
+/// saved.
+///
+/// Only the intermediates. `scores.csv` is what people load into R or
+/// Python and is small; compressing it would be an obstacle rather than a
+/// saving.
+fn compress_kept(
+    cli: &RunArgs,
+    artifacts: &Artifacts,
+    ev: &Sink,
+) -> Result<Option<(u64, u64)>> {
+    let mut dirs = vec![cli.out.clone()];
+    for i in 0..cli.chains {
+        if cli.chains > 1 {
+            dirs.push(chain_dir(cli, i));
+        }
+    }
+    let (mut before, mut after) = (0u64, 0u64);
+    let mut any = false;
+    for dir in dirs {
+        for what in Artifact::ALL {
+            if !artifacts.wants(what) {
+                continue;
+            }
+            let path = dir.join(what.file_name());
+            let Ok(meta) = std::fs::metadata(&path) else { continue };
+            any = true;
+            before += meta.len();
+            let out = crate::squeeze::compress(&path)?;
+            after += std::fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
+        }
+    }
+    if any && before > 0 {
+        ev.status(&format!(
+            "compressing what was kept: {:.1} MB",
+            before as f64 / 1e6
+        ));
+    }
+    Ok(any.then_some((before, after)))
+}
+
 /// Every numeric column of a scores.csv, in file order.
 ///
 /// Only an extension needs this: a fresh run already has the numbers in
@@ -1189,6 +1230,11 @@ fn report_convergence(
     serde_json::to_writer_pretty(&mut file, &report.to_value())?;
     file.write_all(b"\n")?;
 
+    // Compressed once everything is written rather than as it is written:
+    // a chain appends to these across segments, and an appended-to
+    // compressed stream is not a thing.
+    let squeezed = compress_kept(cli, artifacts, ev)?;
+
     ev.status(&format!("\nwrote {}", cli.out.display()));
     let inside = if cli.chains > 1 {
         ev.status(&format!(
@@ -1208,8 +1254,19 @@ fn report_convergence(
     ev.status("  diagnostics.json    R-hat and effective sample size, per score");
     for what in Artifact::ALL {
         if artifacts.wants(what) {
-            ev.status(&format!("  {:<20}{}", what.file_name(), what.describe()));
+            ev.status(&format!(
+                "  {:<24}{}",
+                format!("{}.xz", what.file_name()),
+                what.describe()
+            ));
         }
+    }
+    if let Some((before, after)) = squeezed {
+        ev.status(&format!(
+            "\n  compressed {:.1} MB to {:.1} MB",
+            before as f64 / 1e6,
+            after as f64 / 1e6
+        ));
     }
     Ok(())
 }

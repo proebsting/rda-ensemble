@@ -40,6 +40,7 @@ pub mod scoring;
 pub mod seed;
 pub mod resolved;
 pub mod settings;
+pub mod squeeze;
 
 use std::path::PathBuf;
 
