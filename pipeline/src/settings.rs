@@ -151,13 +151,14 @@ impl Settings {
             crate::Command::Run(args) => {
                 let mut s = Settings::from_args(&args);
                 // Placeholders, not choices: blank them so a form cannot
-                // present them as if they had been decided. The chamber goes
-                // too -- congress is only what the argv above had to say to
-                // parse, not a default anyone chose.
+                // present them as if they had been decided. The chamber and
+                // the variant go too -- those are only what the argv above
+                // had to say to parse, not defaults anyone chose.
                 s.cycle = None;
                 s.steps = None;
                 s.elections = Vec::new();
                 s.plan_type = String::new();
+                s.variant = String::new();
                 s
             }
             _ => unreachable!("that argv is a run"),
@@ -242,6 +243,15 @@ impl Settings {
         }
         if self.steps.is_none() && self.plans.is_none() {
             out.push(want("plans", "How many plans you want, or how many steps to run."));
+        }
+        // Seven variants, no default. cut-edges-ust is what most ensembles
+        // use, but "most" is not "obviously", and which one ran changes what
+        // the ensemble means.
+        if !VARIANTS.contains(&self.variant.as_str()) {
+            out.push(want(
+                "variant",
+                "How the chain proposes changes. cut-edges-ust is the usual choice.",
+            ));
         }
         if self.tolerance <= 0.0 {
             out.push(want(
@@ -506,6 +516,17 @@ fn parse_chamber(s: &str) -> Result<Chamber> {
     })
 }
 
+/// Every variant `variant` accepts, in the order the help lists them.
+pub const VARIANTS: [&str; 7] = [
+    "cut-edges-ust",
+    "cut-edges-region-aware",
+    "district-pairs-ust",
+    "district-pairs-region-aware",
+    "cut-edges-mst",
+    "district-pairs-mst",
+    "reversible",
+];
+
 fn parse_variant(s: &str) -> Result<Variant> {
     Ok(match s {
         "reversible" => Variant::Reversible,
@@ -676,7 +697,7 @@ mod tests {
         assert_eq!(
             fields,
             ["state", "plan_type", "cycle", "elections", "seed_tolerance", "plans",
-             "tolerance"],
+             "variant", "tolerance"],
             "a blank form should want exactly these"
         );
         // Nothing is wanted once they are given.
@@ -698,6 +719,19 @@ mod tests {
         assert!(s.missing().iter().any(|m| m.field == "region_weights"));
         s.region_weights = vec!["COUNTY=1.0".into()];
         assert!(s.missing().is_empty());
+    }
+
+    /// A name that is not one of the seven is reported at the form, not
+    /// left to fail later in `parse_variant`.
+    #[test]
+    fn an_unknown_variant_is_reported() {
+        let mut s = Settings::from_args(&args(&[]));
+        s.variant = "cut-edges-usd".into();
+        assert!(s.missing().iter().any(|m| m.field == "variant"));
+        for name in VARIANTS {
+            s.variant = name.into();
+            assert!(s.missing().iter().all(|m| m.field != "variant"), "{name}");
+        }
     }
 
     /// Zero is a real seed, so nothing in the data can call it undecided.
@@ -737,14 +771,11 @@ mod tests {
         assert_eq!(s.batch_size, 1);
         assert_eq!(s.sample_every, 1);
         assert_eq!(s.adjacency, "auto");
-        // cut-edges-ust is the one pre-selection the form keeps: it is what
-        // essentially every published ensemble uses, and the help says so
-        // rather than calling it a default.
-        assert_eq!(s.variant, "cut-edges-ust");
         // And the placeholders are blank rather than pretending to be
         // decisions.
         assert!(s.state.is_empty());
         assert!(s.plan_type.is_empty(), "the chamber is nobody's default");
+        assert!(s.variant.is_empty(), "nor is the variant");
         assert_eq!(s.cycle, None);
         assert_eq!(s.steps, None);
         assert!(s.elections.is_empty());

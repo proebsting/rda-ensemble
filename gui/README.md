@@ -93,11 +93,14 @@ legislative plans differ in almost everything, so nothing should pick one for
 you: the menu now starts empty and the chamber appears in "still needed" until
 it is set.
 
-**Variant** keeps its pre-selection. `cut-edges-ust` is what essentially every
-published ensemble uses, and the option says "the usual choice" rather than
-"(default)", which is the honest description of a pre-selection the command
-line would not make. If that feels like the same inconsistency, it can go the
-same way as the chamber.
+The **variant** went the same way, and for the same reason. `cut-edges-ust` is
+what most published ensembles use, but "most" is not "obviously", and which
+variant ran changes what the ensemble means. Both menus start empty, and the
+seven names in the menu are checked against `settings::VARIANTS` so the window
+cannot offer one the library would reject.
+
+What is left pre-selected is only what the CLI itself defaults: `adjacency`,
+`chains`, `threads`, `batch_size`, `sample_every`.
 
 ### Labels
 

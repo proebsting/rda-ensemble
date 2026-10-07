@@ -355,8 +355,9 @@
       <label id="w-sample_every"><span class="name">Keep one plan every</span>
         <input type="number" id="sample_every" min="1">
         <span class="hint">steps. 1 by default: every step is kept</span></label>
-      <label><span class="name">How the chain proposes changes</span>
+      <label id="w-variant"><span class="name">How the chain proposes changes</span>
         <select id="variant" class="s-mid">
+          <option value=""></option>
           <option value="cut-edges-ust">cut-edges-ust &mdash; the usual choice</option>
           <option value="cut-edges-region-aware">cut-edges-region-aware</option>
           <option value="district-pairs-ust">district-pairs-ust</option>
@@ -364,7 +365,9 @@
           <option value="cut-edges-mst">cut-edges-mst</option>
           <option value="district-pairs-mst">district-pairs-mst</option>
           <option value="reversible">reversible &mdash; needs balance bound</option>
-        </select></label>
+        </select>
+        <span class="hint">no default; cut-edges-ust is what most published
+          ensembles use</span></label>
       <label id="w-tolerance"><span class="name">How balanced every plan must be</span>
         <input type="number" id="tolerance" class="frac" step="0.001" placeholder="0.05">
         <span class="hint">no default; 0.05 is common for legislative plans</span></label>
