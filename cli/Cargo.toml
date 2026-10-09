@@ -26,13 +26,22 @@ name = "rda-ensemble"
 path = "src/main.rs"
 
 [dependencies]
-rdarust-core = { path = "../crates/rdarust-core" }
-rdarust-geo = { path = "../crates/rdarust-geo" }
-rdarust-io = { path = "../crates/rdarust-io" }
+# Every dependency is a sibling of this repository's directory, so the same
+# paths resolve whether this lives inside rdarust or beside it:
+#
+#   work/
+#     rdarust/            the port
+#     rda-ensemble/       this
+#     partigraph-rust/
+#     rustrecom/          your fork of mggg/rustrecom
+#
+# These become git dependencies once rdarust carries a tag.
+rdarust-core = { path = "../../rdarust/crates/rdarust-core" }
+rdarust-geo = { path = "../../rdarust/crates/rdarust-geo" }
+rdarust-io = { path = "../../rdarust/crates/rdarust-io" }
 
-# External. Override with a [patch] section or by editing these paths.
 partigraph = { path = "../../partigraph-rust/crates/partigraph" }
-rustrecom = { path = "../../../ext/rustrecom" }
+rustrecom = { path = "../../rustrecom" }
 
 anyhow = "1"
 # Pure-Rust TLS and zip: a C toolchain is needed by neither, so the binary

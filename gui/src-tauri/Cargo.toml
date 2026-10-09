@@ -17,7 +17,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 # Everything this app does, the CLI does too: it is a front end, not a
 # second implementation.
-rda-ensemble = { path = "../../pipeline" }
+rda-ensemble = { path = "../../cli" }
 
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }

@@ -21,7 +21,7 @@ for t in aarch64-apple-darwin x86_64-apple-darwin; do
 done
 
 echo "==> command line tool"
-cd "$ROOT/pipeline"
+cd "$ROOT/cli"
 for t in aarch64-apple-darwin x86_64-apple-darwin; do
     cargo build --release --target "$t"
 done
@@ -63,7 +63,7 @@ if [ -n "${NOTARY_PROFILE:-}" ]; then
 fi
 
 cd "$ROOT"
-cp pipeline/README.md "$OUT/command-line.md"
+cp cli/README.md "$OUT/command-line.md"
 cp gui/README.md "$OUT/window.md"
 
 echo
