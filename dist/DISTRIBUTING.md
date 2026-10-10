@@ -1,10 +1,11 @@
 # Making a macOS app
 
 ```sh
-./dist/build-macos.sh
+make dist
 ```
 
-builds everything into `dist/out`, for Intel and Apple Silicon both:
+runs `dist/build-macos.sh`, which builds everything into `dist/out`, for Intel
+and Apple Silicon both:
 
 | | |
 |---|---|

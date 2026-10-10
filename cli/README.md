@@ -701,6 +701,9 @@ With that in place:
 cargo build --release
 ```
 
+Or `make build` from the top of the repository, which builds this and the
+window together.
+
 Rust 1.88 or newer; `rust-toolchain.toml` asks rustup for current stable.
 
 The result links nothing but system libraries, so the binary can be copied to

@@ -4,9 +4,10 @@ Build a redistricting ensemble from Dave's Redistricting data and score every
 plan — from a terminal, or from a window.
 
 ```
-cli/    the command line tool          (see cli/README.md)
-gui/    the same thing, in a window    (see gui/README.md)
-dist/   wraps the window up as a macOS app, if you want one
+cli/        the command line tool          (see cli/README.md)
+gui/        the same thing, in a window    (see gui/README.md)
+dist/       wraps the window up as a macOS app, if you want one
+Makefile    the tasks you repeat once it is all installed
 ```
 
 Both are built from source. There is no download — and building your own
@@ -227,25 +228,33 @@ When it finishes, `my-first-ensemble/` holds:
 real run from nothing to results, including the mistakes that are easy to
 make.
 
-## Running the window without installing it
+## Working on the code
 
-While working on the code it is quicker to skip the bundling:
-
-```sh
-cd rda-ensemble/gui/src-tauri
-```
+Everything above is a first-time installation, written out as commands so that
+a failure says which step failed. Once it is installed, the tasks that come up
+repeatedly live in the `Makefile`. Run `make` with no target to list them:
 
 ```sh
-cargo run --release
+make
 ```
 
-That builds the window and opens it. There are no arguments. Nothing is
-installed, so it is gone when you close it.
+The four that matter:
 
-`dist/build-macos.sh` goes the other way, building both tools for Intel and
-Apple Silicon together into an application and a disk image. That is for
-making something to put on another machine, and `dist/DISTRIBUTING.md`
-explains why that is a harder problem than it looks.
+| | |
+|---|---|
+| `make run` | build the window and open it, installing nothing |
+| `make check` | the tests and clippy — what to run before committing |
+| `make install-app` | rebuild the application and replace the one in `~/Applications` |
+| `make dist` | both tools for Intel and Apple Silicon, as an app and a disk image |
+
+`make run` is the quick loop while changing the window: it builds and opens it
+with nothing installed, so it is gone when you close it. `make install-app` is
+the slower one, and is how the copy in `~/Applications` gets updated after a
+change.
+
+`make dist` is a different thing again — it builds something to put on another
+machine, which is a harder problem than installing one yourself, and
+`dist/DISTRIBUTING.md` explains why.
 
 ## Why four clones
 
@@ -270,11 +279,8 @@ from nothing to results.
 type a forty-flag command line. Every setting carries an explanation of what it
 is for and what goes wrong if it is set badly.
 
-**`dist/`** holds `get-deps.sh`, used above, and `build-macos.sh`, which
-builds both tools for Intel and Apple Silicon together into an application and
-a disk image. That heavier path is for making something to put on another
-machine; `dist/DISTRIBUTING.md` explains why that is a harder problem than
-installing one yourself.
+**`dist/`** holds the two scripts the `Makefile` calls out to: `get-deps.sh`,
+used above, and `build-macos.sh` behind `make dist`.
 
 ## The other repositories
 

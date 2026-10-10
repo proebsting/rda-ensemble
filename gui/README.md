@@ -18,13 +18,16 @@ This builds against three sibling repositories, so follow the top-level
 be. Then:
 
 ```sh
-cd gui/src-tauri
-cargo run --release
+make run
 ```
 
+from the top of the repository, which is `cargo run --release` in
+`gui/src-tauri`.
+
 No npm and no bundler: the page is plain HTML and talks to Rust through
-`window.__TAURI__`. No `tauri` CLI either, to build or run it — only
-`dist/build-macos.sh` needs that, to wrap the result up as a macOS app.
+`window.__TAURI__`. No `tauri` CLI either, to build or run it — only the
+targets that wrap the result up as a macOS app (`make app`, `make install-app`,
+`make dist`) need that.
 
 ## What it shows
 
