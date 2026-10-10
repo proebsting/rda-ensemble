@@ -9,9 +9,6 @@ gui/    the same thing, in a window    (see gui/README.md)
 dist/   building something to hand to someone else
 ```
 
-This repository is **private**. You are reading it because you were given
-access.
-
 ## If you only want to use it
 
 Ask for the disk image rather than building this. `dist/` produces a `.app`
@@ -67,21 +64,7 @@ Check both steps worked:
 cargo --version && cc --version && git --version
 ```
 
-### 3. Access to this repository
-
-It is private, so cloning needs GitHub to know who you are. If
-`ssh -T git@github.com` greets you by name, you are set. If not, the shortest
-route is GitHub's own tool:
-
-```sh
-brew install gh && gh auth login
-```
-
-That needs [Homebrew](https://brew.sh). The alternative is
-[adding an SSH key](https://docs.github.com/en/authentication/connecting-to-github-with-ssh)
-to your account.
-
-### 4. Only for `dist/build-macos.sh`
+### 3. Only for `dist/build-macos.sh`
 
 ```sh
 cargo install tauri-cli
@@ -112,7 +95,7 @@ somewhere/
 From whatever directory you want those four to live in:
 
 ```sh
-git clone git@github.com:proebsting/rda-ensemble.git
+git clone https://github.com/proebsting/rda-ensemble.git
 ./rda-ensemble/dist/get-deps.sh
 ```
 
