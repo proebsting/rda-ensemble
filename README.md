@@ -12,6 +12,90 @@ dist/   building something to hand to someone else
 This repository is **private**. You are reading it because you were given
 access.
 
+## If you only want to use it
+
+Ask for the disk image rather than building this. `dist/` produces a `.app`
+and a `.dmg` that run on any Mac from 2017 onward with nothing else installed
+— no Rust, no compiler, no repositories. `dist/DISTRIBUTING.md` says how one
+is made and what macOS will say about an unsigned one.
+
+Everything below is for working on the code. On a machine that has never built
+software it is an afternoon, mostly spent waiting.
+
+## What you need installed
+
+Starting from a Mac that has never been used for development, in this order.
+All of it happens in **Terminal** — ⌘-Space, type `terminal`, Return.
+
+### 1. Apple's command line tools
+
+```sh
+xcode-select --install
+```
+
+A dialog appears; accept it. This takes several minutes and installs both
+`git` and the C compiler. The compiler is not optional: ensembles are
+compressed with xz, and the `xz2` crate builds liblzma from C source. Without
+it the build fails with a `cc`-not-found error mentioning neither xz nor
+compression.
+
+On Linux this is `sudo apt install build-essential git` or your distribution's
+equivalent.
+
+### 2. Rust
+
+```sh
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+Accept the default installation. Then either open a new Terminal window or:
+
+```sh
+source "$HOME/.cargo/env"
+```
+
+Install it through rustup rather than any other way: `rust-toolchain.toml`
+here asks rustup for current stable, which is how an out-of-date toolchain
+repairs itself. The code needs 1.88 or newer. If you ever see
+`icu_collections` or `icu_properties` "requires rustc 1.88", that is an old
+toolchain and nothing else — the message names a dependency rather than the
+cause, and `rustup update` fixes it.
+
+Check both steps worked:
+
+```sh
+cargo --version && cc --version && git --version
+```
+
+### 3. Access to this repository
+
+It is private, so cloning needs GitHub to know who you are. If
+`ssh -T git@github.com` greets you by name, you are set. If not, the shortest
+route is GitHub's own tool:
+
+```sh
+brew install gh && gh auth login
+```
+
+That needs [Homebrew](https://brew.sh). The alternative is
+[adding an SSH key](https://docs.github.com/en/authentication/connecting-to-github-with-ssh)
+to your account.
+
+### 4. Only for `dist/build-macos.sh`
+
+```sh
+cargo install tauri-cli
+```
+
+Several minutes of compiling. Building or running the window needs nothing
+extra — only the script that produces a `.app` and a disk image does.
+
+### How long the build takes
+
+The first `cargo build --release` compiles several hundred dependencies and
+takes five to fifteen minutes depending on the machine. It is not stuck.
+Later builds take seconds.
+
 ## Building it
 
 Four repositories have to sit beside one another in the same directory. The
@@ -54,34 +138,6 @@ cd rda-ensemble/gui/src-tauri && cargo build --release
 The binaries land in each one's `target/release/`. They link nothing but the
 operating system's own libraries, so either can be copied to another machine
 of the same platform and run as-is.
-
-## What you need installed
-
-**Rust 1.88 or newer.** The `rust-toolchain.toml` here asks rustup for current
-stable, so an up-to-date install needs nothing.
-
-If you see errors about `icu_collections` or `icu_properties` "requires rustc
-1.88", that is this and nothing else — the message names the dependency rather
-than the cause. `rustup update` fixes it.
-
-**A C compiler.** Ensembles are compressed with xz, and the `xz2` crate builds
-liblzma from C source. On macOS that means Xcode Command Line Tools:
-
-```sh
-xcode-select --install
-```
-
-Without them the build fails with a `cc`-not-found error that mentions neither
-xz nor compression, so it is worth ruling out first.
-
-**For `dist/build-macos.sh` only, the Tauri CLI:**
-
-```sh
-cargo install tauri-cli
-```
-
-Building or running the window itself does not need it — only the script that
-produces a `.app` and a disk image does.
 
 ## Why four clones
 
