@@ -1,0 +1,15 @@
+# Build output.
+target/
+gui/src-tauri/gen/
+dist/out/
+
+# Ensemble output written into the repository by mistake. Runs belong in a
+# scratch directory; in rdarust a bi_800/ of test output got committed
+# because a `cd` failed and the run landed in the repository root. These
+# names are unmistakable and nothing legitimate sits one level down under
+# them.
+/*/scores.csv
+/*/plans.jsonl
+/*/plans.jsonl.xz
+/*/by_district.jsonl
+/*/diagnostics.json
