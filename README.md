@@ -25,11 +25,11 @@ All of it happens in **Terminal** — ⌘-Space, type `terminal`, Return.
 xcode-select --install
 ```
 
-A dialog appears; accept it. This takes several minutes and installs both
-`git` and the C compiler. The compiler is not optional: ensembles are
-compressed with xz, and the `xz2` crate builds liblzma from C source. Without
-it the build fails with a `cc`-not-found error mentioning neither xz nor
-compression.
+A dialog appears; accept it, and wait for it to finish before going on. This
+installs both `git` and the C compiler. The compiler is not optional:
+ensembles are compressed with xz, and the `xz2` crate builds liblzma from C
+source. Without it the build fails with a `cc`-not-found error mentioning
+neither xz nor compression.
 
 On Linux this is `sudo apt install build-essential git` or your distribution's
 equivalent.
@@ -65,28 +65,17 @@ code needs 1.88 or newer. If you ever see `icu_collections` or
 else — the message names a dependency rather than the cause, and `rustup
 update` fixes it.
 
-Check both steps worked:
+### 3. Check both arrived
 
 ```sh
 cargo --version && cc --version && git --version
 ```
 
-### 3. Only if you want a double-clickable app
+Three version numbers means you are ready. Worth doing: `xcode-select
+--install` can look finished while its dialog is still working, and the
+failure then turns up a quarter of an hour into a build as a `cc` error.
 
-```sh
-cargo install tauri-cli
-```
-
-Several minutes of compiling. Skip it for now — it is needed only to wrap the
-window up as an `rda-ensemble.app`, and the instructions below say when.
-Everything else needs nothing beyond the two steps above.
-
-### How long the first build takes
-
-Five to fifteen minutes, depending on the machine: it compiles several hundred
-dependencies. It is not stuck. Later builds take seconds.
-
-## Building it
+## Get the code
 
 Four repositories have to sit beside one another in the same directory. The
 dependencies between them are relative paths, so the layout is not optional:
@@ -103,83 +92,91 @@ From whatever directory you want those four to live in:
 
 ```sh
 git clone https://github.com/proebsting/rda-ensemble.git
+```
+
+```sh
 ./rda-ensemble/dist/get-deps.sh
 ```
 
-`get-deps.sh` clones the other three beside it and checks the result. Or do it
-by hand:
+That clones the other three beside it and checks the result. By hand instead,
+it is:
 
 ```sh
 git clone https://github.com/proebsting/rdarust.git
+```
+
+```sh
 git clone https://github.com/proebsting/partigraph-rust.git
+```
+
+```sh
 git clone https://github.com/proebsting/rustrecom.git
 ```
 
-Everything below starts from that same directory — the one holding all four.
+## Install the window as an application
 
-### The command line tool
+This is the whole path for anyone who wants the window and nothing else. The
+command line tool below is a separate thing you can ignore.
 
-```sh
-cd rda-ensemble/cli
-cargo install --path .
-```
-
-`cargo install` builds it and puts it in `~/.cargo/bin`, which rustup already
-added to your path — so afterwards `rda-ensemble` works from any directory.
-This is the first build, so expect five to fifteen minutes.
-
-Check it:
-
-```sh
-rda-ensemble --help
-```
-
-If you would rather not have it on your path, `cargo build --release` instead
-leaves it at `target/release/rda-ensemble` and you call it by that path.
-
-### The window
-
-If you just built the command line tool you are in `rda-ensemble/cli`, so:
-
-```sh
-cd ../gui/src-tauri
-cargo run --release
-```
-
-Coming from the directory holding the four repositories instead, it is
-`cd rda-ensemble/gui/src-tauri`.
-
-That builds it and opens it. There are no arguments.
-
-That is enough to use it, but you have to be in that directory and type that
-each time. For a double-clickable application instead, first:
+One more tool, which turns a built program into a macOS application:
 
 ```sh
 cargo install tauri-cli
 ```
 
-then, from the same `gui/src-tauri` directory:
+Then build it:
+
+```sh
+cd rda-ensemble/gui/src-tauri
+```
 
 ```sh
 cargo tauri build --bundles app
 ```
 
+That first build compiles several hundred dependencies and takes five to
+fifteen minutes depending on the machine. It is not stuck.
+
+Put the result where macOS looks for applications:
+
 ```sh
-cp -R target/release/bundle/macos/rda-ensemble.app /Applications/
+mkdir -p ~/Applications
 ```
 
-The bundling step takes a couple of minutes. Afterwards it is in Launchpad and
-in ⌘-Space like any other application, it keeps working after you delete the
-checkout, and it simply opens — the
-unidentified-developer warning macOS shows applies to applications that were
-*downloaded*, and this one was not.
+```sh
+cp -R target/release/bundle/macos/rda-ensemble.app ~/Applications/
+```
 
-`dist/build-macos.sh` does a heavier version of the same thing, building both
-tools for Intel and Apple Silicon together. That is for making something to
-hand to another machine; `dist/DISTRIBUTING.md` explains why that is a harder
-problem than it looks.
+Open it from Launchpad, or with ⌘-Space and typing its name. It keeps working
+after you delete the checkout it was built from.
 
-## Your first run
+It simply opens, with nothing to approve: the unidentified-developer warning
+macOS shows applies to applications that were **downloaded**, and one you
+compiled yourself was not.
+
+`gui/README.md` explains what every setting in the window means. Choosing a
+state downloads its data the first time, a few megabytes, and keeps it.
+
+## The command line tool
+
+Optional, and separate from the window — the two do the same job.
+
+```sh
+cd rda-ensemble/cli
+```
+
+```sh
+cargo install --path .
+```
+
+`cargo install` builds it and puts it in `~/.cargo/bin`, which rustup already
+added to your path, so afterwards `rda-ensemble` works from any directory.
+
+```sh
+rda-ensemble --help
+```
+
+### A first run
 
 ```sh
 rda-ensemble states
@@ -230,6 +227,26 @@ When it finishes, `my-first-ensemble/` holds:
 real run from nothing to results, including the mistakes that are easy to
 make.
 
+## Running the window without installing it
+
+While working on the code it is quicker to skip the bundling:
+
+```sh
+cd rda-ensemble/gui/src-tauri
+```
+
+```sh
+cargo run --release
+```
+
+That builds the window and opens it. There are no arguments. Nothing is
+installed, so it is gone when you close it.
+
+`dist/build-macos.sh` goes the other way, building both tools for Intel and
+Apple Silicon together into an application and a disk image. That is for
+making something to put on another machine, and `dist/DISTRIBUTING.md`
+explains why that is a harder problem than it looks.
+
 ## Why four clones
 
 Honestly, because this is an interim arrangement. The three dependencies could
@@ -253,12 +270,11 @@ from nothing to results.
 type a forty-flag command line. Every setting carries an explanation of what it
 is for and what goes wrong if it is set badly.
 
-**`dist/`** turns the window into a `rda-ensemble.app` you can keep in
-Applications and launch like anything else, for both Intel and Apple Silicon.
-Built on your own machine it just runs: the warnings macOS shows about
-unidentified developers apply to things that were *downloaded*, and nothing
-you compiled yourself was. `dist/DISTRIBUTING.md` covers the rest, including
-why handing the result to someone else is a different proposition.
+**`dist/`** holds `get-deps.sh`, used above, and `build-macos.sh`, which
+builds both tools for Intel and Apple Silicon together into an application and
+a disk image. That heavier path is for making something to put on another
+machine; `dist/DISTRIBUTING.md` explains why that is a harder problem than
+installing one yourself.
 
 ## The other repositories
 
