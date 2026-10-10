@@ -20,7 +20,13 @@ them.
 
 ## For yourself, this is the whole story
 
-Drag `rda-ensemble.app` into `/Applications` and launch it like anything else.
+```sh
+cp -R dist/out/rda-ensemble.app /Applications/
+```
+
+or drag it there in Finder. It then launches like anything else, and keeps
+working after you delete the checkout it was built from.
+
 It will simply open: the warnings macOS shows about unidentified developers
 apply to applications that were **downloaded**, and one you compiled on your
 own machine was not. Nothing to approve, nothing to explain.

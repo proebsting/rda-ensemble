@@ -132,8 +132,34 @@ cd rda-ensemble/gui/src-tauri
 cargo run --release
 ```
 
-That builds it and opens it. There are no arguments. To get an
-`rda-ensemble.app` you can keep in Applications instead, see `dist/`.
+That builds it and opens it. There are no arguments.
+
+That is enough to use it, but you have to be in that directory and type that
+each time. For a double-clickable application instead, first:
+
+```sh
+cargo install tauri-cli
+```
+
+then, from the same `gui/src-tauri` directory:
+
+```sh
+cargo tauri build --bundles app
+```
+
+```sh
+cp -R target/release/bundle/macos/rda-ensemble.app /Applications/
+```
+
+The bundling step takes a couple of minutes. The result launches like anything
+else, keeps working after you delete the checkout, and simply opens — the
+unidentified-developer warning macOS shows applies to applications that were
+*downloaded*, and this one was not.
+
+`dist/build-macos.sh` does a heavier version of the same thing, building both
+tools for Intel and Apple Silicon together. That is for making something to
+hand to another machine; `dist/DISTRIBUTING.md` explains why that is a harder
+problem than it looks.
 
 ## Your first run
 
