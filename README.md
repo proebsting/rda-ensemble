@@ -105,19 +105,86 @@ git clone https://github.com/proebsting/partigraph-rust.git
 git clone https://github.com/proebsting/rustrecom.git
 ```
 
-Then build whichever you want:
+### The command line tool
 
 ```sh
-cd rda-ensemble/cli && cargo build --release
+cd rda-ensemble/cli
+cargo install --path .
 ```
+
+`cargo install` builds it and puts it in `~/.cargo/bin`, which rustup already
+added to your path — so afterwards `rda-ensemble` works from any directory.
+This is the first build, so expect five to fifteen minutes.
+
+Check it:
 
 ```sh
-cd rda-ensemble/gui/src-tauri && cargo build --release
+rda-ensemble --help
 ```
 
-The binaries land in each one's `target/release/`. They link nothing but the
-operating system's own libraries, so either can be copied to another machine
-of the same platform and run as-is.
+If you would rather not have it on your path, `cargo build --release` instead
+leaves it at `target/release/rda-ensemble` and you call it by that path.
+
+### The window
+
+```sh
+cd rda-ensemble/gui/src-tauri
+cargo run --release
+```
+
+That builds it and opens it. There are no arguments. To get an
+`rda-ensemble.app` you can keep in Applications instead, see `dist/`.
+
+## Your first run
+
+```sh
+rda-ensemble states
+```
+
+That asks Dave's Redistricting what it publishes and prints a state per line.
+Nothing has been downloaded yet.
+
+Now build a small ensemble for North Carolina:
+
+```sh
+rda-ensemble run \
+  --state NC --plan-type congress --cycle 2020 \
+  --elections E_16-20_COMP \
+  --seed-tolerance 0.01 --tolerance 0.05 \
+  --variant cut-edges-ust --rng-seed 1 \
+  --plans 100 --sample-every 10 \
+  --out my-first-ensemble
+```
+
+The first run downloads that state from DRA — 4.6 MB for North Carolina,
+17 MB once unpacked — and keeps it, so later runs start immediately. The
+hundred plans themselves take a couple of seconds.
+
+It will finish by telling you the ensemble is too small:
+
+```
+  effective N  6 at worst, on population_compactness   (of 100 sampled)
+               consecutive plans are correlated; a larger --sample-every helps
+```
+
+That is the tool working, not failing. A hundred plans taken ten steps apart
+really are too alike to be worth a hundred independent ones, and real work
+uses thousands of plans sampled hundreds of steps apart. Being told so is the
+point of that section.
+
+When it finishes, `my-first-ensemble/` holds:
+
+| | |
+|---|---|
+| `scores.csv` | one row per plan, one column per measure — this is the result |
+| `by_district.jsonl` | the same plans, district by district |
+| `settings.json` | every decision this run made, enough to repeat it exactly |
+| `manifest.json` | the same, plus what actually happened |
+| `diagnostics.json` | whether the chain ran long enough to be trusted |
+
+`cli/README.md` explains every option, and `cli/WALKTHROUGH.md` follows one
+real run from nothing to results, including the mistakes that are easy to
+make.
 
 ## Why four clones
 

@@ -18,6 +18,10 @@ One binary. No Python, no shell script, no intermediate files.
 
 Nothing but the binary. It fetches the data itself.
 
+These examples assume `rda-ensemble` is on your path, which `cargo install
+--path .` arranges. Built with `cargo build --release` instead, it is at
+`target/release/rda-ensemble` and you call it by that path.
+
 ```sh
 rda-ensemble run \
   --state NC --plan-type congress --cycle 2020 \
