@@ -13,13 +13,18 @@ gui/
 
 ## Running it
 
+This builds against three sibling repositories, so follow the top-level
+[README](../README.md) first — `dist/get-deps.sh` puts them where they need to
+be. Then:
+
 ```sh
 cd gui/src-tauri
 cargo run --release
 ```
 
-No npm, no bundler, no `tauri` CLI. The page is plain HTML and talks to Rust
-through `window.__TAURI__`.
+No npm and no bundler: the page is plain HTML and talks to Rust through
+`window.__TAURI__`. No `tauri` CLI either, for building and running — only
+`dist/build-macos.sh` needs that, to produce a `.app` and a disk image.
 
 ## What it shows
 

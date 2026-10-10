@@ -55,14 +55,33 @@ The binaries land in each one's `target/release/`. They link nothing but the
 operating system's own libraries, so either can be copied to another machine
 of the same platform and run as-is.
 
-## Rust
+## What you need installed
 
-1.88 or newer. The `rust-toolchain.toml` here asks rustup for current stable,
-so an up-to-date install needs nothing.
+**Rust 1.88 or newer.** The `rust-toolchain.toml` here asks rustup for current
+stable, so an up-to-date install needs nothing.
 
 If you see errors about `icu_collections` or `icu_properties` "requires rustc
 1.88", that is this and nothing else — the message names the dependency rather
 than the cause. `rustup update` fixes it.
+
+**A C compiler.** Ensembles are compressed with xz, and the `xz2` crate builds
+liblzma from C source. On macOS that means Xcode Command Line Tools:
+
+```sh
+xcode-select --install
+```
+
+Without them the build fails with a `cc`-not-found error that mentions neither
+xz nor compression, so it is worth ruling out first.
+
+**For `dist/build-macos.sh` only, the Tauri CLI:**
+
+```sh
+cargo install tauri-cli
+```
+
+Building or running the window itself does not need it — only the script that
+produces a `.app` and a disk image does.
 
 ## Why four clones
 

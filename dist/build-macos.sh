@@ -29,6 +29,15 @@ lipo -create -output "$OUT/rda-ensemble" \
     "target/aarch64-apple-darwin/release/rda-ensemble" \
     "target/x86_64-apple-darwin/release/rda-ensemble"
 
+# Checked here rather than left to fail as "no such subcommand: tauri",
+# which does not say what to install.
+if ! cargo tauri --version >/dev/null 2>&1; then
+    echo "This step needs the Tauri CLI:" >&2
+    echo >&2
+    echo "    cargo install tauri-cli" >&2
+    exit 1
+fi
+
 echo "==> window"
 cd "$ROOT/gui/src-tauri"
 # The bundler's own dmg step drives Finder through AppleScript and fails
