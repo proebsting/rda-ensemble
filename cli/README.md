@@ -671,22 +671,33 @@ prints, so the terminal and a menu are fed from the same place.
 
 ## Building
 
-Three libraries, two of them outside this repository:
+Three libraries, all outside this repository:
 
-- [rdarust](..) — extraction and scoring
+- [rdarust](https://github.com/proebsting/rdarust) — extraction and scoring
 - [partigraph](https://github.com/proebsting/partigraph-rust) — the starting plan
-- [rustrecom](https://github.com/mggg/rustrecom) — the chain
+- [rustrecom](https://github.com/proebsting/rustrecom) — the chain
 
-The paths to the latter two are in `Cargo.toml`. Adjust them, then:
+They are relative path dependencies, so all four repositories have to sit in
+the same parent directory:
+
+```
+somewhere/
+├── rda-ensemble/     this one
+├── rdarust/
+├── partigraph-rust/
+└── rustrecom/
+```
+
+`../dist/get-deps.sh` clones the other three for you. See the top-level
+README for the whole story, including why it is four clones and not one.
+
+With that in place:
 
 ```sh
 cargo build --release
 ```
 
-This crate is deliberately **not** a member of the rdarust workspace, because
-it cannot build without those two checkouts. That also means the directory
-lifts out into its own repository unchanged: only the three path dependencies
-would need to become git or version ones.
+Rust 1.88 or newer; `rust-toolchain.toml` asks rustup for current stable.
 
 The result links nothing but system libraries, so the binary can be copied to
 another machine of the same platform and run.

@@ -12,7 +12,9 @@ name = "rda-ensemble"
 description = "Generate and score a redistricting ensemble from a DRA GeoJSON"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.77"
+# 1.77 was claimed here and is not true: the dependency tree needs
+# 1.88, which is what cargo reports against the icu crates.
+rust-version = "1.88"
 license = "MIT"
 
 # A library as well as a binary: the GUI front end this is headed for links

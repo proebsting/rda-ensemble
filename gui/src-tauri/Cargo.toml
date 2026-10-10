@@ -8,7 +8,9 @@ name = "rda-ensemble-gui"
 description = "Build a redistricting ensemble without a terminal"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.77"
+# 1.77 was claimed here and is not true: the dependency tree needs
+# 1.88, which is what cargo reports against the icu crates.
+rust-version = "1.88"
 license = "MIT"
 
 [build-dependencies]

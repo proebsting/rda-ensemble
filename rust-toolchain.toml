@@ -1,0 +1,8 @@
+# Current stable, fetched by rustup if it is not already there.
+#
+# The dependency tree needs 1.88 or newer -- cargo reports it as
+# "icu_collections requires rustc 1.88", which names the dependency rather
+# than the cause and sends people looking in the wrong place. Asking for
+# stable here means an out-of-date install fixes itself.
+[toolchain]
+channel = "stable"
