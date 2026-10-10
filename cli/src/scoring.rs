@@ -317,7 +317,7 @@ impl StatsWriter for ScoringWriter {
         let from = st.last_step + 1;
         self.replay(&mut st, from, step.saturating_sub(1)).map_err(to_io)?;
         st.previous = partition.assignments.clone();
-        if self.interval != 0 && step % self.interval == 0 {
+        if self.interval != 0 && step.is_multiple_of(self.interval) {
             let now = st.previous.clone();
             self.score(&mut st, step, &now).map_err(to_io)?;
         }

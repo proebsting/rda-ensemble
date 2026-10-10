@@ -476,8 +476,8 @@ pub fn forget(
 ) -> Result<Vec<Cached>> {
     let doomed: Vec<Cached> = contents(cache)
         .into_iter()
-        .filter(|c| state.map_or(true, |s| s.eq_ignore_ascii_case(&c.state)))
-        .filter(|c| version.map_or(true, |v| v == c.version))
+        .filter(|c| state.is_none_or(|s| s.eq_ignore_ascii_case(&c.state)))
+        .filter(|c| version.is_none_or(|v| v == c.version))
         .collect();
     for c in &doomed {
         std::fs::remove_dir_all(&c.path)
