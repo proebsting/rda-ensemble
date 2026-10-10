@@ -6,11 +6,13 @@ plan — from a terminal, or from a window.
 ```
 cli/    the command line tool          (see cli/README.md)
 gui/    the same thing, in a window    (see gui/README.md)
-dist/   packaging, for later
+dist/   wraps the window up as a macOS app, if you want one
 ```
 
-Both are built from source. Nothing here is distributed as a ready-made
-application at the moment.
+Both are built from source. There is no download — and building your own
+turns out to be the better position anyway, since an application you compiled
+carries no quarantine flag and so meets none of the Gatekeeper or
+device-policy obstacles a downloaded one does.
 
 ## What you need installed
 
@@ -57,11 +59,16 @@ Check both steps worked:
 cargo --version && cc --version && git --version
 ```
 
-### 3. Nothing else
+### 3. Only if you want a macOS app
 
-Building and running both the command line tool and the window needs only the
-two steps above. `dist/` holds packaging machinery that is not currently in
-use; if you ever run it, it will tell you what it wants.
+```sh
+cargo install tauri-cli
+```
+
+Several minutes of compiling. Skip it unless you intend to run
+`dist/build-macos.sh`, which wraps the window up as a double-clickable
+`rda-ensemble.app`. Building and running either tool needs nothing beyond the
+two steps above.
 
 ### How long the build takes
 
@@ -135,10 +142,12 @@ from nothing to results.
 type a forty-flag command line. Every setting carries an explanation of what it
 is for and what goes wrong if it is set badly.
 
-**`dist/`** holds packaging machinery, not currently in use. An unsigned
-application runs into Gatekeeper and into institutional device policy, which
-is a worse problem than it sounds, so the only supported route today is
-building from source.
+**`dist/`** turns the window into a `rda-ensemble.app` you can keep in
+Applications and launch like anything else, for both Intel and Apple Silicon.
+Built on your own machine it just runs: the warnings macOS shows about
+unidentified developers apply to things that were *downloaded*, and nothing
+you compiled yourself was. `dist/DISTRIBUTING.md` covers the rest, including
+why handing the result to someone else is a different proposition.
 
 ## The other repositories
 

@@ -1,4 +1,4 @@
-# Sending this to someone
+# Making a macOS app
 
 ```sh
 ./dist/build-macos.sh
@@ -18,7 +18,17 @@ Both binaries are universal, and both link nothing but `libSystem`, `libobjc`
 and `libiconv` — all part of macOS. There is nothing to install alongside
 them.
 
-## The one real obstacle: macOS will refuse to open it
+## For yourself, this is the whole story
+
+Drag `rda-ensemble.app` into `/Applications` and launch it like anything else.
+It will simply open: the warnings macOS shows about unidentified developers
+apply to applications that were **downloaded**, and one you compiled on your
+own machine was not. Nothing to approve, nothing to explain.
+
+That is worth knowing because the moment it travels, the picture changes
+completely.
+
+## Giving it to someone else is a different proposition
 
 Anything downloaded from the internet is quarantined. An **unsigned**
 application that is quarantined gets
