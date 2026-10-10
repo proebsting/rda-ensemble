@@ -6,18 +6,11 @@ plan — from a terminal, or from a window.
 ```
 cli/    the command line tool          (see cli/README.md)
 gui/    the same thing, in a window    (see gui/README.md)
-dist/   building something to hand to someone else
+dist/   packaging, for later
 ```
 
-## If you only want to use it
-
-Ask for the disk image rather than building this. `dist/` produces a `.app`
-and a `.dmg` that run on any Mac from 2017 onward with nothing else installed
-— no Rust, no compiler, no repositories. `dist/DISTRIBUTING.md` says how one
-is made and what macOS will say about an unsigned one.
-
-Everything below is for working on the code. On a machine that has never built
-software it is an afternoon, mostly spent waiting.
+Both are built from source. Nothing here is distributed as a ready-made
+application at the moment.
 
 ## What you need installed
 
@@ -64,14 +57,11 @@ Check both steps worked:
 cargo --version && cc --version && git --version
 ```
 
-### 3. Only for `dist/build-macos.sh`
+### 3. Nothing else
 
-```sh
-cargo install tauri-cli
-```
-
-Several minutes of compiling. Building or running the window needs nothing
-extra — only the script that produces a `.app` and a disk image does.
+Building and running both the command line tool and the window needs only the
+two steps above. `dist/` holds packaging machinery that is not currently in
+use; if you ever run it, it will tell you what it wants.
 
 ### How long the build takes
 
@@ -145,8 +135,10 @@ from nothing to results.
 type a forty-flag command line. Every setting carries an explanation of what it
 is for and what goes wrong if it is set badly.
 
-**`dist/`** builds a universal macOS app and disk image. `dist/DISTRIBUTING.md`
-is frank about what Gatekeeper will do to an unsigned one.
+**`dist/`** holds packaging machinery, not currently in use. An unsigned
+application runs into Gatekeeper and into institutional device policy, which
+is a worse problem than it sounds, so the only supported route today is
+building from source.
 
 ## The other repositories
 

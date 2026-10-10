@@ -22,9 +22,8 @@ cd gui/src-tauri
 cargo run --release
 ```
 
-No npm and no bundler: the page is plain HTML and talks to Rust through
-`window.__TAURI__`. No `tauri` CLI either, for building and running — only
-`dist/build-macos.sh` needs that, to produce a `.app` and a disk image.
+No npm, no bundler and no `tauri` CLI: the page is plain HTML and talks to
+Rust through `window.__TAURI__`.
 
 ## What it shows
 
