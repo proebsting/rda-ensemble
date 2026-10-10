@@ -59,22 +59,20 @@ Check both steps worked:
 cargo --version && cc --version && git --version
 ```
 
-### 3. Only if you want a macOS app
+### 3. Only if you want a double-clickable app
 
 ```sh
 cargo install tauri-cli
 ```
 
-Several minutes of compiling. Skip it unless you intend to run
-`dist/build-macos.sh`, which wraps the window up as a double-clickable
-`rda-ensemble.app`. Building and running either tool needs nothing beyond the
-two steps above.
+Several minutes of compiling. Skip it for now — it is needed only to wrap the
+window up as an `rda-ensemble.app`, and the instructions below say when.
+Everything else needs nothing beyond the two steps above.
 
-### How long the build takes
+### How long the first build takes
 
-The first `cargo build --release` compiles several hundred dependencies and
-takes five to fifteen minutes depending on the machine. It is not stuck.
-Later builds take seconds.
+Five to fifteen minutes, depending on the machine: it compiles several hundred
+dependencies. It is not stuck. Later builds take seconds.
 
 ## Building it
 
@@ -105,6 +103,8 @@ git clone https://github.com/proebsting/partigraph-rust.git
 git clone https://github.com/proebsting/rustrecom.git
 ```
 
+Everything below starts from that same directory — the one holding all four.
+
 ### The command line tool
 
 ```sh
@@ -127,10 +127,15 @@ leaves it at `target/release/rda-ensemble` and you call it by that path.
 
 ### The window
 
+If you just built the command line tool you are in `rda-ensemble/cli`, so:
+
 ```sh
-cd rda-ensemble/gui/src-tauri
+cd ../gui/src-tauri
 cargo run --release
 ```
+
+Coming from the directory holding the four repositories instead, it is
+`cd rda-ensemble/gui/src-tauri`.
 
 That builds it and opens it. There are no arguments.
 
@@ -151,8 +156,9 @@ cargo tauri build --bundles app
 cp -R target/release/bundle/macos/rda-ensemble.app /Applications/
 ```
 
-The bundling step takes a couple of minutes. The result launches like anything
-else, keeps working after you delete the checkout, and simply opens — the
+The bundling step takes a couple of minutes. Afterwards it is in Launchpad and
+in ⌘-Space like any other application, it keeps working after you delete the
+checkout, and it simply opens — the
 unidentified-developer warning macOS shows applies to applications that were
 *downloaded*, and this one was not.
 
