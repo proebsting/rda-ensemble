@@ -34,24 +34,36 @@ compression.
 On Linux this is `sudo apt install build-essential git` or your distribution's
 equivalent.
 
-### 2. Rust
+### 2. Rust, via rustup
+
+Rust is installed by a tool called **rustup**, which also keeps it up to date.
+This is the official installer, from [rustup.rs](https://rustup.rs) — it
+fetches rustup and rustup then fetches Rust:
 
 ```sh
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-Accept the default installation. Then either open a new Terminal window or:
+Accept the default installation when it asks. It puts everything under
+`~/.cargo` and `~/.rustup`, touching nothing else, and adds `~/.cargo/bin` to
+your path. For that to take effect, either open a new Terminal window or:
 
 ```sh
 source "$HOME/.cargo/env"
 ```
 
-Install it through rustup rather than any other way: `rust-toolchain.toml`
-here asks rustup for current stable, which is how an out-of-date toolchain
-repairs itself. The code needs 1.88 or newer. If you ever see
-`icu_collections` or `icu_properties` "requires rustc 1.88", that is an old
-toolchain and nothing else — the message names a dependency rather than the
-cause, and `rustup update` fixes it.
+If piping a downloaded script into a shell makes you uneasy — a reasonable
+instinct — [rustup.rs](https://rustup.rs) offers the same thing as a file you
+can read first, and `brew install rustup` works too if you already have
+Homebrew.
+
+Use rustup rather than any other route. The `rust-toolchain.toml` in this
+repository asks rustup for current stable, which is how an out-of-date
+toolchain repairs itself; a Rust installed some other way cannot do that. The
+code needs 1.88 or newer. If you ever see `icu_collections` or
+`icu_properties` "requires rustc 1.88", that is an old toolchain and nothing
+else — the message names a dependency rather than the cause, and `rustup
+update` fixes it.
 
 Check both steps worked:
 
