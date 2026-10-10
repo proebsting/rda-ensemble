@@ -18,8 +18,6 @@ BUNDLE := $(GUI)/target/release/bundle/macos/rda-ensemble.app
 help:
 	@echo 'Developer tasks. Run `make <target>`.'
 	@echo
-	@echo '  deps         clone the three sibling repositories this builds against'
-	@echo
 	@echo '  build        build both the command line tool and the window'
 	@echo '  test         run the test suite'
 	@echo '  lint         clippy, both of them, warnings and all'
@@ -34,12 +32,9 @@ help:
 	@echo '  clean        delete every build directory'
 	@echo
 	@echo 'Installing from nothing is in README.md, as commands rather than targets.'
+	@echo 'That includes dist/get-deps.sh, which you run once and never again.'
 
 # ---------------------------------------------------------------- building
-
-.PHONY: deps
-deps:
-	./dist/get-deps.sh
 
 .PHONY: build
 build:

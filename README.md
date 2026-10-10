@@ -279,8 +279,8 @@ from nothing to results.
 type a forty-flag command line. Every setting carries an explanation of what it
 is for and what goes wrong if it is set badly.
 
-**`dist/`** holds the two scripts the `Makefile` calls out to: `get-deps.sh`,
-used above, and `build-macos.sh` behind `make dist`.
+**`dist/`** holds `get-deps.sh`, used above and then never again, and
+`build-macos.sh`, which is what `make dist` runs.
 
 ## The other repositories
 
