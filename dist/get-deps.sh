@@ -46,10 +46,15 @@ if [ -n "$missing" ]; then
 fi
 
 echo
-echo "Ready. Build the command line tool with:"
+echo 'Ready. The next step is the README section "Install the window as an'
+echo 'application", here:'
 echo
-echo "    cd $HERE/cli && cargo build --release"
+echo "    $HERE/README.md"
 echo
-echo "or the window with:"
+echo 'It ends with the application in ~/Applications. Nothing needs building by'
+echo 'hand first -- that section compiles the window on the way. The command'
+echo 'line tool is separate and optional, in the section after it.'
 echo
-echo "    cd $HERE/gui/src-tauri && cargo build --release"
+echo 'Once something is installed, this lists the tasks that come up repeatedly:'
+echo
+echo "    cd $HERE && make"
